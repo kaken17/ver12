@@ -45,9 +45,17 @@ export async function searchSchoolData(question) {
     .limit(500);
 
   if (error) {
-    console.error("Supabase search error:", error);
-    throw new Error("学校資料を検索できませんでした");
-  }
+  console.error("Supabase search error:", {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint
+  });
+
+  throw new Error(
+    `学校資料の検索に失敗しました（${error.code || "UNKNOWN"}）`
+  );
+}
 
   const results = (data || []).map((item) => {
     const text =
