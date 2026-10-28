@@ -64,8 +64,8 @@ function speakJapanese(text) {
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "ja-JP";
-  utterance.rate = 1.0;
-  utterance.pitch = 1.05;
+  utterance.rate = 0.95;
+  utterance.pitch = 1.0;
 
   // ブラウザに日本語音声があれば優先して選ぶ
   const voices = window.speechSynthesis.getVoices();
