@@ -44,19 +44,16 @@ export async function searchSchoolData(question) {
     .select("url,title,category,content,fetched_at")
     .limit(500);
 
-  if (error) {
-  console.error("Supabase search error:", {
-    message: error.message,
-    code: error.code,
-    details: error.details,
-    hint: error.hint
-  });
+if (error) {
+  console.error(
+    "Supabase search error details:",
+    JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+  );
 
   throw new Error(
-    `学校資料の検索に失敗しました（${error.code || "UNKNOWN"}）`
+    `学校資料の検索に失敗しました: ${error.message || String(error)}`
   );
 }
-
   const results = (data || []).map((item) => {
     const text =
       `${item.title} ${item.category} ${item.content}`.toLowerCase();
