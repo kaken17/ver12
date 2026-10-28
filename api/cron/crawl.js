@@ -248,20 +248,42 @@ export default async function handler(req, res) {
     const errors = [];
 
     for (const url of urls) {
-      try {
-        const html = await getText(url);
-        const doc = cleanPage(html, url);
+     
+try {
+  let doc;
 
-        if (doc.content.length < 80) continue;
+  if (isPdfUrl(url)) {
+    // PDFの場合：PDFから本文を抽出
+    const content = await getPdfText(url);
 
-        documents.push(doc);
-      } catch (error) {
-        errors.push({
-          url,
-          message: String(error.message || error).slice(0, 200)
-        });
-      }
-    }
+    const filename = decodeURIComponent(
+      new URL(url).pathname.split("/").pop() || "学校資料.pdf"
+    );
+
+    doc = {
+      url,
+      title: filename.slice(0, 300),
+      category: "公式PDF資料",
+      content: content.slice(0, 12000),
+      source_date: null,
+      fetched_at: new Date().toISOString()
+    };
+  } else {
+    // HTMLの場合：従来どおり本文を抽出
+    const html = await getText(url);
+    doc = cleanPage(html, url);
+  }
+
+  if (doc.content.length < 80) continue;
+
+  documents.push(doc);
+} catch (error) {
+  errors.push({
+    url,
+    message: String(error.message || error).slice(0, 200)
+  });
+}
+
 
     if (documents.length > 0) {
       const { error } = await supabase
@@ -284,4 +306,7 @@ export default async function handler(req, res) {
       error: "資料の収集に失敗しました"
     });
   }
+function isPdfUrl(url) {
+  return /\.pdf$/i.test(new URL(url).pathname);
+}
 }
