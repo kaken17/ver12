@@ -36,6 +36,23 @@ function addMessage(text, role) {
 }
 
 // AIの回答を日本語で読み上げる
+
+function cleanTextForSpeech(text) {
+  return text
+    // URLを除去
+    .replace(/https?:\/\/\S+/gi, " ")
+    // Markdownのリンクは表示文字だけ残す
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    // Markdownの見出し・強調記号を除去
+    .replace(/[*_`#~]/g, "")
+    // 絵文字・装飾記号を除去
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    // 連続する空白を整理
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
 function speakJapanese(text) {
   if (!speechSupported) {
     statusText.textContent = "このブラウザでは音声を利用できません";
@@ -166,7 +183,11 @@ if (!response.ok) {
     }
 
     // 回答を音声で読み上げる
-    speakJapanese(answer);
+    const speechText = cleanTextForSpeech(answer);
+
+if (speechText) {
+  speakJapanese(speechText);
+}
   } catch (error) {
     loadingBubble.remove();
 
