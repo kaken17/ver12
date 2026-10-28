@@ -87,35 +87,30 @@ async function getAllowedPaths() {
   };
 }
 
+
 function cleanPage(html, url) {
   const $ = cheerio.load(html);
 
   $("script, style, noscript, nav, footer, header, iframe, form").remove();
 
-  const title = $("title").first().text().trim() ||
+  const title =
+    $("title").first().text().trim() ||
     $("h1").first().text().trim() ||
     url;
 
-  const content = $("main").text().trim() ||
+  const content =
+    $("main").text().trim() ||
     $("article").text().trim() ||
     $("body").text().trim();
 
   return {
     url,
     title: title.slice(0, 300),
+    category: "公式サイト",
     content: content.replace(/\s+/g, " ").slice(0, 12000),
     source_date: null,
     fetched_at: new Date().toISOString()
-  category: "公式サイト",
-   return {
-      url,
-      title: title.slice(0, 300),
-      category: "公式サイト",
-      content: content.replace(/\s+/g, " ").slice(0, 12000),
-      source_date: null,
-      fetched_at: new Date().toISOString()
-    };
-  }; 
+  };
 }
 
 async function collectUrls(isAllowed) {
