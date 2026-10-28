@@ -5,7 +5,7 @@ import pdf from "pdf-parse";
 
 const ROOT = "https://yameth.fku.ed.jp/";
 const HOST = new URL(ROOT).hostname;
-const MAX_PAGES = 12;
+const MAX_PAGES = 30;
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
@@ -31,7 +31,56 @@ async function getText(url) {
     },
     signal: AbortSignal.timeout(8000),
     redirect: "follow"
+  }
+async function getPdfText(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "YameSchoolGuideBot/1.0",
+      "Accept": "application/pdf"
+    },
+    signal: AbortSignal.timeout(15000),
+    redirect: "follow"
   });
+
+  if (!response.ok) {
+    throw new Error(`PDF取得失敗 HTTP ${response.status}`);
+  }
+
+  // 学校公式サイト以外への転送を拒否
+  const finalUrl = new URL(response.url);
+
+  if (finalUrl.hostname !== HOST) {
+    throw new Error("別ドメインへの転送を拒否しました");
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  // 10MBを超えるファイルは処理しない
+  if (buffer.length > 10 * 1024 * 1024) {
+    throw new Error("PDFが10MBを超えています");
+  }
+
+  // PDFファイルか確認
+  if (buffer.subarray(0, 5).toString() !== "%PDF-") {
+    throw new Error("PDFファイルではありません");
+  }
+
+  // PDFから文章を抽出
+  const parsed = await pdf(buffer);
+
+  const content = (parsed.text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!content) {
+    throw new Error(
+      "文章を抽出できません。画像形式のPDFかもしれません"
+    );
+  }
+
+  return content;
+}
+);
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${url}`);
@@ -141,7 +190,7 @@ async function collectUrls(isAllowed) {
             url.hostname === HOST &&
             url.protocol === "https:" &&
             isAllowed(url.href) &&
-            !/\.(pdf|jpg|jpeg|png|gif|zip|mp4|docx?)$/i.test(url.pathname)
+           !/\.(jpg|jpeg|png|gif|webp|svg|zip|mp4|mp3|docx?|xlsx?|pptx?|xml)$/i.test(url.pathname)
           ) {
             found.add(url.href);
           }
