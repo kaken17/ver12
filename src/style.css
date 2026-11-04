@@ -700,4 +700,31 @@ code {
     right: 0;
     border-right-color: var(--border);
   }
+
+.source-list {
+  margin-top: 16px;
+  padding: 12px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.source-list h4 {
+  font-size: 13px;
+  color: #475569;
+  margin: 0 0 10px;
+}
+
+.source-list a {
+  display: block;
+  color: #2563eb;
+  font-size: 13px;
+  text-decoration: underline;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.source-list a:hover {
+  color: #1d4ed8;
+}
 }
