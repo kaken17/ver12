@@ -701,30 +701,43 @@ code {
     border-right-color: var(--border);
   }
 
+
+/* 出典表示エリア */
 .source-list {
-  margin-top: 16px;
-  padding: 12px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-  border-radius: 10px;
+  margin-top: 18px;
+  padding: 14px;
+  background: #f1f5f9;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
 }
 
 .source-list h4 {
-  font-size: 13px;
-  color: #475569;
-  margin: 0 0 10px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
 }
 
-.source-list a {
-  display: block;
+.source-item {
+  padding: 7px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.source-item:last-child {
+  border-bottom: none;
+}
+
+.source-item a {
   color: #2563eb;
   font-size: 13px;
+  line-height: 1.7;
   text-decoration: underline;
-  margin: 8px 0;
   overflow-wrap: anywhere;
+  cursor: pointer;
 }
 
-.source-list a:hover {
+.source-item a:hover {
   color: #1d4ed8;
 }
+
 }
