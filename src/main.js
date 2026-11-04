@@ -1,7 +1,7 @@
 
 import "./style.css";
 
-// HTMLの部品を取得する
+// HTMLの部品を取得
 const form = document.querySelector("#chat-form");
 const questionInput = document.querySelector("#question");
 const sendButton = document.querySelector("#send-button");
@@ -12,18 +12,17 @@ const avatar = document.querySelector("#avatar");
 const mouth = document.querySelector("#mouth");
 const avatarStatus = document.querySelector("#avatar-status");
 
-// 会話の履歴を保存する
+// 会話履歴
 const conversation = [];
 
-// 二重送信を防ぐ
 let isLoading = false;
 
-// 音声読み上げに対応しているか確認
+// 音声読み上げ対応確認
 const speechSupported =
   "speechSynthesis" in window &&
   "SpeechSynthesisUtterance" in window;
 
-// 画面にメッセージを追加する
+// メッセージ表示
 function addMessage(text, role) {
   const bubble = document.createElement("div");
   bubble.className = `bubble ${role}`;
@@ -35,40 +34,92 @@ function addMessage(text, role) {
   return bubble;
 }
 
-// AIの回答を日本語で読み上げる
+// 出典リンクを表示
+function addSourcesToBubble(bubble, sources) {
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return;
+  }
 
+  // URLの重複を除去
+  const uniqueSources = [
+    ...new Map(
+      sources
+        .filter((item) => item && typeof item.source === "string")
+        .map((item) => [item.source, item])
+    ).values()
+  ];
+
+  const section = document.createElement("div");
+  section.className = "source-list";
+
+  const heading = document.createElement("h4");
+  heading.textContent = "参考資料・出典";
+  section.appendChild(heading);
+
+  uniqueSources.forEach((item) => {
+    try {
+      const url = new URL(item.source);
+
+      // 安全なURLだけを許可
+      if (!["https:", "http:"].includes(url.protocol)) {
+        return;
+      }
+
+      const link = document.createElement("a");
+
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = item.title || "参考ページを見る";
+
+      const linkItem = document.createElement("div");
+      linkItem.className = "source-item";
+
+      linkItem.appendChild(link);
+      section.appendChild(linkItem);
+
+    } catch (error) {
+      console.warn("無効な出典URL:", item.source);
+    }
+  });
+
+  // 有効な出典がある場合だけ表示
+  if (section.querySelector("a")) {
+    bubble.appendChild(section);
+    messages.scrollTop = messages.scrollHeight;
+  }
+}
+
+// 音声読み上げ用の文章を整理
 function cleanTextForSpeech(text) {
   return text
-    // URLを除去
     .replace(/https?:\/\/\S+/gi, " ")
-    // Markdownのリンクは表示文字だけ残す
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // Markdownの見出し・強調記号を除去
     .replace(/[*_`#~]/g, "")
-    // 絵文字・装飾記号を除去
     .replace(/\p{Extended_Pictographic}/gu, "")
-    // 連続する空白を整理
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n")
     .trim();
 }
 
+// 日本語音声読み上げ
 function speakJapanese(text) {
   if (!speechSupported) {
-    statusText.textContent = "このブラウザでは音声を利用できません";
+    statusText.textContent =
+      "このブラウザでは音声を利用できません";
     return;
   }
 
-  // 前の音声を止める
   window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
+
   utterance.lang = "ja-JP";
   utterance.rate = 0.95;
   utterance.pitch = 1.0;
 
-  // ブラウザに日本語音声があれば優先して選ぶ
   const voices = window.speechSynthesis.getVoices();
+
   const japaneseVoice = voices.find(
     (voice) => voice.lang.toLowerCase() === "ja-jp"
   );
@@ -101,19 +152,22 @@ function speakJapanese(text) {
   window.speechSynthesis.speak(utterance);
 }
 
-// AIに質問を送信する
+// AIに質問を送信
 async function askAI(question) {
   if (isLoading) return;
 
   isLoading = true;
   sendButton.disabled = true;
   questionInput.disabled = true;
-  statusText.textContent = "AIが回答を考えています…";
 
-  const loadingBubble = addMessage("回答を考えています…", "ai");
+  statusText.textContent = "学校の資料とWebを検索しています…";
+
+  const loadingBubble = addMessage(
+    "学校の資料とWebを検索しています…",
+    "ai"
+  );
 
   try {
-    // Vercelに設置したサーバーAPIを呼び出す
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -130,64 +184,83 @@ async function askAI(question) {
       })
     });
 
-    
-const contentType = response.headers.get("content-type") || "";
-const responseText = await response.text();
+    const contentType =
+      response.headers.get("content-type") || "";
 
-let data;
+    const responseText = await response.text();
 
-if (contentType.includes("application/json")) {
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    console.error("JSON解析エラー:", responseText.slice(0, 500));
-    throw new Error("サーバーから正しいJSONが返されませんでした。");
-  }
-} else {
-  console.error(
-    "APIがHTMLなどを返しました:",
-    response.status,
-    responseText.slice(0, 500)
-  );
+    let data;
 
-  throw new Error(
-    `APIの応答形式が正しくありません（HTTP ${response.status}）。Vercelのデプロイとログを確認してください。`
-  );
-}
+    if (contentType.includes("application/json")) {
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        console.error("JSON解析エラー:", responseText.slice(0, 500));
+        throw new Error(
+          "サーバーから正しいJSONが返されませんでした。"
+        );
+      }
+    } else {
+      console.error(
+        "API応答エラー:",
+        response.status,
+        responseText.slice(0, 500)
+      );
 
-if (!response.ok) {
-  throw new Error(
-    data.error || "AIとの通信に失敗しました。"
-  );
-}
+      throw new Error(
+        `APIの応答形式が正しくありません（HTTP ${response.status}）。`
+      );
+    }
 
+    if (!response.ok) {
+      throw new Error(
+        data.error || "AIとの通信に失敗しました。"
+      );
+    }
 
-    if (typeof data.answer !== "string" || !data.answer.trim()) {
-      throw new Error("AIから回答が返ってきませんでした。");
+    if (
+      typeof data.answer !== "string" ||
+      !data.answer.trim()
+    ) {
+      throw new Error(
+        "AIから回答が返ってきませんでした。"
+      );
     }
 
     const answer = data.answer.trim();
 
-    loadingBubble.remove();
-    addMessage(answer, "ai");
+    // 回答を表示
+    loadingBubble.textContent = answer;
 
-    // 次の質問にも会話の流れを引き継ぐ
+    // 出典リンクを回答の下に表示
+    addSourcesToBubble(
+      loadingBubble,
+      data.sources || []
+    );
+
+    // 会話履歴に保存
     conversation.push(
       { role: "user", content: question },
       { role: "assistant", content: answer }
     );
 
-    // 履歴が長くなりすぎないように制限
+    // 履歴を最大12件に制限
     if (conversation.length > 12) {
-      conversation.splice(0, conversation.length - 12);
+      conversation.splice(
+        0,
+        conversation.length - 12
+      );
     }
 
     // 回答を音声で読み上げる
     const speechText = cleanTextForSpeech(answer);
 
-if (speechText) {
-  speakJapanese(speechText);
-}
+    if (speechText) {
+      speakJapanese(speechText);
+    }
+
+    statusText.textContent = "回答が完了しました";
+
   } catch (error) {
     loadingBubble.remove();
 
@@ -200,6 +273,7 @@ if (speechText) {
     );
 
     statusText.textContent = "接続エラー";
+
   } finally {
     isLoading = false;
     sendButton.disabled = false;
@@ -208,7 +282,7 @@ if (speechText) {
   }
 }
 
-// フォーム送信時の処理
+// フォーム送信
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -216,14 +290,14 @@ form.addEventListener("submit", async (event) => {
 
   if (!question || isLoading) return;
 
-  // ユーザーの質問を画面に表示
   addMessage(question, "user");
+
   questionInput.value = "";
 
   await askAI(question);
 });
 
-// 音声停止ボタン
+// 音声停止
 stopButton.addEventListener("click", () => {
   if (speechSupported) {
     window.speechSynthesis.cancel();
@@ -231,6 +305,7 @@ stopButton.addEventListener("click", () => {
 
   avatar.classList.remove("talking");
   mouth.classList.remove("open");
+
   avatarStatus.textContent = "あなたの学校案内係";
   statusText.textContent = "音声を停止しました";
 });
