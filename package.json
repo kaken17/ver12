@@ -15,7 +15,8 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.109.0",
-    "cheerio": "^1.2.0"
+    "@supabase/supabase-js": "^2.118.0",
+    "cheerio": "^1.2.0",
+    "pdf-parse": "^1.1.1"
   }
 }
