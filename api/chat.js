@@ -681,3 +681,4 @@ return res.status(200).json({
   model: FREE_MODEL
 });
 }
+}
