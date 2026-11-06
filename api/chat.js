@@ -16,7 +16,6 @@ const FREE_MODEL = "openrouter/free";
 // =====================================
 // カテゴリー別指示
 // =====================================
-
 const CATEGORY_INSTRUCTIONS = {
   学科: "学科名、学習内容、専門科目、実習内容、各学科の違いを説明してください。",
 
@@ -33,15 +32,8 @@ const CATEGORY_INSTRUCTIONS = {
   学校行事: "文化祭、体育祭、修学旅行などを説明してください。",
 
   アクセス: `
-所在地、郵便番号、電話番号、FAX番号、
-公共交通機関、最寄り駅、バス停、
-自動車でのアクセス、駐車場、公式地図を説明してください。
-資料にない情報は推測しないでください。
-`,
-
-  学校概要: "学校の歴史、教育方針、特色を説明してください。"
-};
 学校への行き方を知りたい人に向けて、次の項目を整理してください。
+
 1. 郵便番号と所在地
 2. 電話番号
 3. FAX番号
@@ -57,7 +49,6 @@ const CATEGORY_INSTRUCTIONS = {
 
   学校概要: "学校の歴史、教育方針、特色を説明してください。"
 };
-
 
 // =====================================
 // 実在する公式URLだけを許可
@@ -672,7 +663,7 @@ const finalAnswer = appendSources(
       answer: finalAnswer,
       category,
       sources,
-      webSources:webSources: webSchoolSources.length,
+      webSources: webSchoolSources.length,
       model: FREE_MODEL
     });
 
@@ -682,10 +673,11 @@ const finalAnswer = appendSources(
       message: error?.message,
       stack: error?.stack
     });
-
-    return res.status(500).json({
-      error: "サーバーでエラーが発生しました。",
-      stage: currentStage
-    });
-  }
+return res.status(200).json({
+  answer: finalAnswer,
+  category,
+  sources,
+  webSources: webSchoolSources.length,
+  model: FREE_MODEL
+});
 }
