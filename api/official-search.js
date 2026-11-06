@@ -185,7 +185,15 @@ function rankLinks(links, question, category) {
       if (/八工news|ニュース/i.test(link.title)) {
         score += 10;
       }
+if (category === "アクセス") {
+  if (/アクセス|交通|地図/.test(link.title)) {
+    score += 40;
+  }
 
+  if (/駐車場|交通機関|所在地/.test(link.title)) {
+    score += 25;
+  }
+}
       return {
         ...link,
         score
