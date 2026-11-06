@@ -314,7 +314,15 @@ export async function searchOfficialWebsite(
   while (
     queue.length > 0 &&
     visited.size < MAX_PAGES
-  ) {
+  ) 
+    const pdfCandidates = [
+    ...pdfMap.values()
+  ].slice(0, 6);
+
+  for (const pdf of pdfCandidates) {
+    const extractedPdf =
+      await extractOfficialPdf(pdf.url);
+{
     const current = queue.shift();
 
     const safeUrl = normalizeUrl(current.url);
@@ -393,13 +401,6 @@ export async function searchOfficialWebsite(
   // PDF本文を自動取得
   // ===================================
 
-  const pdfCandidates = [
-    ...pdfMap.values()
-  ].slice(0, 6);
-
-  for (const pdf of pdfCandidates) {
-    const extractedPdf =
-      await extractOfficialPdf(pdf.url);
 
     if (!extractedPdf) continue;
 
@@ -426,31 +427,53 @@ export async function searchOfficialWebsite(
   // 最終結果を関連度順に整理
   // ===================================
 
-  const rankedResults = results
-    .map(doc => {
-      const ranked = rankLinks(
-        [{
-          title: doc.title,
-          url: doc.source
-        }],
-        question,
-        category
-      );
+const rankedResults = results
+  .map(doc => {
+    const ranked = rankLinks(
+      [{
+        title: doc.title,
+        url: doc.source
+      }],
+      question,
+      category
+    );
 
-      return {
-        doc,
-        score: ranked[0]?.score || 0
-      };
-    })
-    .sort((a, b) => b.score - a.score);
+    let score = ranked[0]?.score || 0;
 
-    const finalResults = rankedResults
-    .filter(item => item.score >= 15)
-    .slice(0, 8)
-    .map(item => item.doc);
-  
-  const organizedResults =
-    organizeSchoolDocuments(finalResults);
-  
-  return organizedResults;
+    // 本文に含まれる検索語も評価
+    const content = String(doc.content || "")
+      .normalize("NFKC")
+      .toLowerCase();
+
+    const terms = CATEGORY_TERMS[category] || [];
+
+    for (const term of terms) {
+      if (content.includes(
+        term.normalize("NFKC").toLowerCase()
+      )) {
+        score += 5;
+      }
+    }
+
+    // PDF資料を少し優先
+    if (doc.origin === "official_pdf") {
+      score += 10;
+    }
+
+    return {
+      doc,
+      score
+    };
+  })
+  .sort((a, b) => b.score - a.score);
+
+const finalResults = rankedResults
+  .filter(item => item.score >= 15)
+  .slice(0, 8)
+  .map(item => item.doc);
+
+const organizedResults =
+  organizeSchoolDocuments(finalResults);
+
+return organizedResults;
 }
