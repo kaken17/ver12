@@ -1,12 +1,11 @@
-
 import {
   searchSchoolData,
   classifyQuestion
-} 
-  import {
+} from "./search.js";
+
+import {
   searchOfficialWebsite
 } from "./official-search.js";
-  from "./search.js";
 
 // =====================================
 // 無料AIモデル固定
