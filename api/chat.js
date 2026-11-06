@@ -586,18 +586,7 @@ const webSchoolSources =
       throw new Error("AIに渡す学校資料がありません");
     }
 
-    const context = schoolSources
-      .map((item, index) => {
-        return [
-          `【資料${index + 1}】`,
-          `タイトル：${item.title || "不明"}`,
-          `分類：${item.category || "不明"}`,
-          `更新日：${item.source_date || "不明"}`,
-          `URL：${item.source || "不明"}`,
-          `内容：${String(item.content || "").slice(0, 8000)}`
-        ].join("\n");
-      })
-      .join("\n\n");
+  
 
     // ⑦ AIへの指示
 
