@@ -273,72 +273,54 @@ function countOccurrences(text, term) {
 // 資料の関連度を計算
 // =====================================
 
+
 function scoreDocument(doc, profile) {
   let score = 0;
 
-  const pattern =
-    CATEGORY_PATTERNS[profile.category];
+  const title = doc.normalizedTitle;
+  const category = doc.normalizedCategory;
+  const content = doc.normalizedContent;
 
-  const titleMatch = pattern?.test(
-    doc.normalizedTitle
+  // 質問の重要語を優先
+  const terms = profile.grams.filter(
+    term => term.length >= 2
   );
 
-  const categoryMatch = pattern?.test(
-    doc.normalizedCategory
+  for (const term of terms) {
+    if (title.includes(term)) score += 12;
+    if (category.includes(term)) score += 8;
+    if (content.includes(term)) score += 2;
+  }
+
+  // カテゴリー一致
+  const pattern = CATEGORY_PATTERNS[profile.category];
+
+  if (pattern?.test(title)) score += 25;
+  if (pattern?.test(category)) score += 20;
+  if (pattern?.test(content)) score += 5;
+
+  // 質問全体との一致
+  if (
+    profile.cleaned.length >= 3 &&
+    title.includes(profile.cleaned)
+  ) {
+    score += 30;
+  }
+
+  // 年度が新しい資料を優先
+  const date = Date.parse(
+    doc.source_date || doc.fetched_at || ""
   );
 
-  const contentMatch = pattern?.test(
-    doc.normalizedContent
-  );
+  if (Number.isFinite(date)) {
+    const ageDays =
+      (Date.now() - date) / 86400000;
 
-  // カテゴリー一致を優先
-  if (titleMatch) score += 15;
-  if (categoryMatch) score += 12;
-  if (contentMatch) score += 3;
-
-  // 検索語の一致
-  for (const term of profile.grams) {
-    const titleCount = countOccurrences(
-      doc.normalizedTitle,
-      term
-    );
-
-    const contentCount = countOccurrences(
-      doc.normalizedContent,
-      term
-    );
-
-    const categoryCount = countOccurrences(
-      doc.normalizedCategory,
-      term
-    );
-
-    if (titleCount > 0) {
-      score += 5 + Math.min(titleCount, 3);
-    }
-
-    if (categoryCount > 0) {
+    if (ageDays >= 0 && ageDays <= 365) {
+      score += 8;
+    } else if (ageDays > 365 && ageDays <= 730) {
       score += 4;
     }
-
-    if (contentCount > 0) {
-      score += Math.min(contentCount, 5);
-    }
-  }
-
-  // 質問そのものとの一致
-  if (
-    profile.cleaned.length >= 3 &&
-    doc.normalizedTitle.includes(profile.cleaned)
-  ) {
-    score += 12;
-  }
-
-  if (
-    profile.cleaned.length >= 3 &&
-    doc.normalizedContent.includes(profile.cleaned)
-  ) {
-    score += 5;
   }
 
   return score;
