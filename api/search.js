@@ -551,6 +551,90 @@ export async function searchSchoolData(question) {
 
   const profile = makeQueryProfile(question);
 
+ 
   console.log("検索プロフィール:", {
     category: profile.category,
     intent: profile.intent,
+    departmentNames: profile.departmentNames,
+    documentCount: documents.length
+  });
+
+  // ===================================
+  // 関連度計算
+  // ===================================
+
+  const ranked = documents
+    .map(doc => ({
+      doc,
+      score: scoreDocument(doc, profile)
+    }))
+    .filter(item => item.score >= 10)
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      const dateA = Date.parse(
+        a.doc.source_date || a.doc.fetched_at || ""
+      ) || 0;
+
+      const dateB = Date.parse(
+        b.doc.source_date || b.doc.fetched_at || ""
+      ) || 0;
+
+      return dateB - dateA;
+    });
+
+  // ===================================
+  // 学科比較の場合
+  // ===================================
+
+  let results;
+
+  if (profile.intent.departmentComparison) {
+    const departmentDocs = ranked.filter(
+      item =>
+        item.doc.normalizedCategory === "学科"
+    );
+
+    const otherDocs = ranked.filter(
+      item =>
+        item.doc.normalizedCategory !== "学科"
+    );
+
+    results = [
+      ...departmentDocs,
+      ...otherDocs
+    ].slice(0, 8);
+
+  } else {
+    results = ranked.slice(0, 8);
+  }
+
+  // ===================================
+  // 検索ログ
+  // ===================================
+
+  console.log("学校資料検索結果:", {
+    question: question.slice(0, 100),
+    category: profile.category,
+    totalDocuments: documents.length,
+    matchedDocuments: ranked.length,
+    selectedDocuments: results.length,
+    selectedTitles: results.map(
+      item => item.doc.title
+    )
+  });
+
+  // ===================================
+  // 検索結果を返す
+  // ===================================
+
+  return results.map(({ doc }) => ({
+    title: doc.title || "タイトル不明",
+    category: doc.category || "学校情報",
+    content: doc.content,
+    source: doc.url || "",
+    source_date: doc.source_date || null
+  }));
+}
