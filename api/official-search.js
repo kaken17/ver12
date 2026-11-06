@@ -2,17 +2,53 @@
 const SCHOOL_URL = "https://yameth.fku.ed.jp/";
 const SCHOOL_HOST = "yameth.fku.ed.jp";
 
+const MAX_PAGES = 15;
+const MAX_DEPTH = 3;
+const MAX_CONTENT_LENGTH = 10000;
+const TIMEOUT_MS = 8000;
+
 const CATEGORY_TERMS = {
-  学科: ["学科", "IT自動車", "電子機械", "電気科", "情報技術", "土木科", "工業化学"],
-  部活動: ["部活動", "部活", "ラグビー", "野球", "陸上", "弓道", "研究部", "eスポーツ"],
-  資格: ["資格", "検定", "電気工事士", "自動車整備士"],
-  進路: ["進路", "就職", "進学", "大学", "企業"],
-  入試: ["入試", "募集要項", "受験", "選抜"],
-  学費: ["学費", "授業料", "納入金"],
-  学校行事: ["学校行事", "文化祭", "体育祭", "修学旅行"],
-  アクセス: ["アクセス", "所在地", "交通"],
-  学校概要: ["学校概要", "学校紹介", "教育方針", "学校長"]
+  学科: [
+    "学科", "各科紹介", "電子機械", "IT自動車",
+    "自動車", "電気科", "情報技術", "土木科",
+    "工業化学", "学習内容"
+  ],
+  部活動: [
+    "部活動", "部活", "ラグビー", "野球",
+    "陸上", "弓道", "相撲", "研究部",
+    "eスポーツ", "工業系大会"
+  ],
+  資格: [
+    "資格", "検定", "取得", "電気工事士",
+    "自動車整備士", "ジュニアマイスター"
+  ],
+  進路: [
+    "進路", "就職", "進学", "大学",
+    "企業", "卒業後", "進路状況"
+  ],
+  入試: [
+    "入試", "募集要項", "受験", "選抜",
+    "募集人数", "入学者"
+  ],
+  学費: [
+    "学費", "授業料", "入学金", "納入金"
+  ],
+  学校行事: [
+    "学校行事", "文化祭", "体育祭",
+    "修学旅行", "行事予定"
+  ],
+  アクセス: [
+    "アクセス", "所在地", "住所", "交通"
+  ],
+  学校概要: [
+    "学校概要", "学校紹介", "教育方針",
+    "特色", "沿革", "校長", "八工News"
+  ]
 };
+
+// =====================================
+// HTMLからテキストを取得
+// =====================================
 
 function decodeHtml(text) {
   return text
@@ -38,48 +74,82 @@ function htmlToText(html) {
   );
 }
 
-function extractLinks(html) {
+// =====================================
+// URLを安全な形式に統一
+// =====================================
+
+function normalizeUrl(value, base = SCHOOL_URL) {
+  try {
+    const url = new URL(value, base);
+
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== SCHOOL_HOST ||
+      url.username ||
+      url.password
+    ) {
+      return null;
+    }
+
+    url.hash = "";
+
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+// =====================================
+// リンクを抽出
+// =====================================
+
+function extractLinks(html, baseUrl) {
   const links = [];
+  const pdfs = [];
+
   const regex =
     /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
 
   let match;
 
   while ((match = regex.exec(html)) !== null) {
-    try {
-      const url = new URL(match[1], SCHOOL_URL);
-      const title = htmlToText(match[2]);
+    const url = normalizeUrl(match[1], baseUrl);
 
-      if (
-        url.hostname !== SCHOOL_HOST ||
-        url.protocol !== "https:" ||
-        !title ||
-        title.length < 2 ||
-        /\.(pdf|jpg|jpeg|png|zip|xlsx?|docx?)$/i.test(url.pathname)
-      ) {
-        continue;
-      }
+    if (!url) continue;
 
-      if (
-        !links.some(item => item.url === url.href)
-      ) {
-        links.push({
-          url: url.href,
-          title
-        });
+    const title = htmlToText(match[2]);
+
+    if (!title || title.length < 2) continue;
+
+    if (/\.pdf(?:$|[?#])/i.test(url)) {
+      if (!pdfs.some(item => item.url === url)) {
+        pdfs.push({ title, url });
       }
-    } catch {
-      // 不正なURLは除外
+      continue;
+    }
+
+    if (
+      /\.(jpg|jpeg|png|gif|zip|xlsx?|docx?)$/i.test(url)
+    ) {
+      continue;
+    }
+
+    if (!links.some(item => item.url === url)) {
+      links.push({ title, url });
     }
   }
 
-  return links;
+  return { links, pdfs };
 }
+
+// =====================================
+// 関連度を計算
+// =====================================
 
 function rankLinks(links, question, category) {
   const terms = [
     ...(CATEGORY_TERMS[category] || []),
-    ...question
+    ...String(question)
       .normalize("NFKC")
       .split(/[\s、。？！?]+/)
       .filter(word => word.length >= 2)
@@ -99,26 +169,57 @@ function rankLinks(links, question, category) {
         }
       }
 
+      // 学校情報の主要ページを優先
+      if (/学科|各科紹介/.test(link.title)) {
+        if (category === "学科") score += 30;
+      }
+
+      if (/部活動|工業系大会/.test(link.title)) {
+        if (category === "部活動") score += 30;
+      }
+
+      if (/進路/.test(link.title)) {
+        if (category === "進路") score += 30;
+      }
+
+      if (/八工news|ニュース/i.test(link.title)) {
+        score += 10;
+      }
+
       return {
         ...link,
         score
       };
     })
-    .filter(link => link.score > 0)
+    .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score);
 }
 
+// =====================================
+// ページ取得
+// =====================================
+
 async function fetchPage(url) {
   try {
-    const response = await fetch(url, {
+    const safeUrl = normalizeUrl(url);
+
+    if (!safeUrl) return null;
+
+    const response = await fetch(safeUrl, {
       headers: {
         "User-Agent": "ver12-school-information-bot/1.0",
         "Accept": "text/html"
       },
-      signal: AbortSignal.timeout(8000)
+      redirect: "follow",
+      signal: AbortSignal.timeout(TIMEOUT_MS)
     });
 
-    if (!response.ok) return null;
+    // リダイレクト先も公式ドメインか確認
+    const finalUrl = normalizeUrl(response.url);
+
+    if (!finalUrl || !response.ok) {
+      return null;
+    }
 
     const contentType =
       response.headers.get("content-type") || "";
@@ -133,84 +234,157 @@ async function fetchPage(url) {
       return null;
     }
 
-    return htmlToText(html).slice(0, 12000);
+    return {
+      html,
+      text: htmlToText(html),
+      url: finalUrl
+    };
 
   } catch (error) {
-    console.error("公式サイト取得エラー:", url, error.message);
+    console.error(
+      "公式ページ取得エラー:",
+      url,
+      error.message
+    );
+
     return null;
   }
 }
 
 // =====================================
-// 公式サイト自動検索
+// 公式サイト2〜3階層自動巡回
 // =====================================
 
 export async function searchOfficialWebsite(
   question,
   category = "学校概要"
 ) {
-  try {
-    // ① 公式トップページ取得
-    const response = await fetch(SCHOOL_URL, {
-      headers: {
-        "User-Agent": "ver12-school-information-bot/1.0"
-      },
-      signal: AbortSignal.timeout(8000)
-    });
+  const visited = new Set();
+  const queue = [
+    {
+      url: SCHOOL_URL,
+      title: "八女工業高等学校公式サイト",
+      depth: 0
+    }
+  ];
 
-    if (!response.ok) return [];
+  const results = [];
+  const pdfMap = new Map();
 
-    const html = await response.text();
+  while (
+    queue.length > 0 &&
+    visited.size < MAX_PAGES
+  ) {
+    const current = queue.shift();
 
-    // ② 公式サイト内のリンク取得
-    const links = extractLinks(html);
+    const safeUrl = normalizeUrl(current.url);
 
-    // ③ 質問に関連するページを選択
-    const ranked = rankLinks(
-      links,
+    if (!safeUrl || visited.has(safeUrl)) {
+      continue;
+    }
+
+    visited.add(safeUrl);
+
+    const page = await fetchPage(safeUrl);
+
+    if (!page) continue;
+
+    // トップページ以外を検索結果に追加
+    if (current.depth > 0 && page.text.length >= 50) {
+      results.push({
+        title: current.title,
+        category,
+        content: page.text.slice(
+          0,
+          MAX_CONTENT_LENGTH
+        ),
+        source: page.url,
+        source_date: null,
+        origin: "official_website",
+        depth: current.depth
+      });
+    }
+
+    // ページ内リンクとPDFリンクを取得
+    const extracted = extractLinks(
+      page.html,
+      page.url
+    );
+
+    for (const pdf of extracted.pdfs) {
+      pdfMap.set(pdf.url, pdf);
+    }
+
+    // 最大階層に到達したら終了
+    if (current.depth >= MAX_DEPTH) {
+      continue;
+    }
+
+    // 未訪問ページを関連度順に並べる
+    const candidates = rankLinks(
+      extracted.links,
       question,
       category
     );
 
-    // ④ 関連度の高い5ページまで取得
-    const selected = ranked.slice(0, 5);
-
-    const pages = await Promise.all(
-      selected.map(async link => {
-        const content = await fetchPage(link.url);
-
-        if (!content || content.length < 50) {
-          return null;
-        }
-
-        return {
+    // 1ページから最大8リンクを次の候補にする
+    for (const link of candidates.slice(0, 8)) {
+      if (
+        !visited.has(link.url) &&
+        !queue.some(item => item.url === link.url)
+      ) {
+        queue.push({
+          url: link.url,
           title: link.title,
-          category,
-          content,
-          source: link.url,
-          source_date: null,
-          origin: "official_website"
-        };
-      })
-    );
+          depth: current.depth + 1
+        });
+      }
+    }
 
-    const results = pages.filter(Boolean);
-
-    console.log("公式サイト検索:", {
-      category,
-      discoveredLinks: links.length,
-      selectedPages: results.length
+    console.log("公式サイト巡回:", {
+      title: current.title,
+      depth: current.depth,
+      foundLinks: extracted.links.length,
+      foundPdfs: extracted.pdfs.length,
+      visitedPages: visited.size
     });
-
-    return results;
-
-  } catch (error) {
-    console.error(
-      "公式サイト検索エラー:",
-      error.message
-    );
-
-    // Web検索に失敗してもSupabase検索は継続できる
-    return [];
   }
+
+  // ===================================
+  // 最終結果を関連度順に整理
+  // ===================================
+
+  const rankedResults = results
+    .map(doc => {
+      const ranked = rankLinks(
+        [{
+          title: doc.title,
+          url: doc.source
+        }],
+        question,
+        category
+      );
+
+      return {
+        doc,
+        score: ranked[0]?.score || 0
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const finalResults = rankedResults
+    .slice(0, 8)
+    .map(item => item.doc);
+
+  console.log("公式サイト検索完了:", {
+    category,
+    visitedPages: visited.size,
+    htmlResults: finalResults.length,
+    discoveredPdfs: pdfMap.size,
+    resultTitles: finalResults.map(
+      item => item.title
+    )
+  });
+
+  return finalResults;
 }
