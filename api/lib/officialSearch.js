@@ -428,9 +428,13 @@ export async function searchOfficialWebsite(
   );
 
   const finalResults = rankedResults
-    .filter(item => item.score >= 15)
-    .slice(0, 8)
-    .map(item => item.doc);
+  .filter(item =>
+    item.doc.content &&
+    item.doc.content.trim().length >= 50 &&
+    item.score >= 5
+  )
+  .slice(0, 8)
+  .map(item => item.doc);
 
   // ⑤ 学校資料の分類
 
