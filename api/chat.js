@@ -5,7 +5,7 @@ import {
 
 import {
   searchOfficialWebsite
-} from "./official-search.js";
+} from "./officialsearch.js";
 
 // =====================================
 // 無料AIモデル固定
@@ -24,11 +24,10 @@ const CATEGORY_INSTRUCTIONS = {
   進路: "就職と進学を区別し、資料にある情報だけ説明してください。",
   入試: "募集要項、募集人数、選抜方法、出願日程を説明し、年度を明記してください。",
   学費: "授業料、入学金、教材費、その他の費用を区別してください。",
-  学校行事: "文化祭、体育祭、修学旅行などを説明してください。",
-  
-アクセス: `
-学校への行き方を知りたい人に向けて、次の項目を整理してください。
+   学校行事: "文化祭、体育祭、修学旅行などを説明してください。",
 
+  アクセス: `
+学校への行き方を知りたい人に向けて、次の項目を整理してください。
 1. 郵便番号と所在地
 2. 電話番号
 3. FAX番号
@@ -39,14 +38,8 @@ const CATEGORY_INSTRUCTIONS = {
 8. 駐車場の利用条件
 9. 公式サイトの地図案内
 
-重要なルール：
-・資料に記載された住所や電話番号を正確に回答する。
-・交通手段や所要時間は資料に記載された場合だけ回答する。
-・最寄り駅やバス停が確認できない場合は推測しない。
-・駐車場の利用条件は年度や工事状況を確認する。
-・公式アクセスページへのリンクを案内する。
-・中学生や保護者が実際に訪問できるように分かりやすく説明する。
-`
+資料にない情報は推測しないでください。
+`,
 
   学校概要: "学校の歴史、教育方針、特色を説明してください。"
 };
@@ -655,18 +648,17 @@ const finalAnswer = appendSources(
 
     // ⑫ 正常終了
 
-    console.log("検索結果:", {
+   console.log("統合検索結果:", {
   category,
-  databaseSources: databaseSources.length,
-  officialWebSources: webSchoolSources.length,
-  totalSources: schoolSources.length,
-  model: FREE_MODEL
+  databaseCount: databaseSources.length,
+  officialWebCount: webSchoolSources.length,
+  totalCount: schoolSources.length
 });
     return res.status(200).json({
       answer: finalAnswer,
       category,
       sources,
-      webSources: 0,
+      webSources:webSources: webSchoolSources.length,
       model: FREE_MODEL
     });
 
