@@ -71,11 +71,19 @@ function normalizeOfficialUrl(value) {
 
     url.hash = "";
     return url.href;
+  } catch (error) {
+    console.error("Chat API error:", {
+      stage: currentStage,
+      message: error?.message,
+      stack: error?.stack
+    });
 
-  } catch {
-    return null;
+  }return res.status(500).json({
+      error: "サーバーでエラーが発生しました。",
+      stage: currentStage,
+      detail: error?.message || "Unknown error"
+    });
   }
-}
 
 // =====================================
 // URLが実際に存在するか確認
