@@ -1,5 +1,5 @@
-import { extractOfficialPdf } from "./pdfExtractor.js";
 
+import { extractOfficialPdf } from "./pdfExtractor.js";
 import {
   organizeSchoolDocuments
 } from "./schoolOrganizer.js";
@@ -10,7 +10,268 @@ const SCHOOL_HOST = "yameth.fku.ed.jp";
 const MAX_PAGES = 15;
 const MAX_DEPTH = 3;
 const MAX_CONTENT_LENGTH = 10000;
+const MAX_PDFS = 6;
 const TIMEOUT_MS = 8000;
+
+const CATEGORY_TERMS = {
+  学科: [
+    "学科", "各科紹介", "電子機械",
+    "IT自動車", "自動車", "電気科",
+    "情報技術", "土木科", "工業化学",
+    "学習内容"
+  ],
+  部活動: [
+    "部活動", "部活", "ラグビー",
+    "野球", "陸上", "弓道", "相撲",
+    "研究部", "eスポーツ"
+  ],
+  資格: [
+    "資格", "検定", "取得",
+    "電気工事士", "自動車整備士",
+    "ジュニアマイスター"
+  ],
+  進路: [
+    "進路", "就職", "進学",
+    "大学", "企業", "卒業後"
+  ],
+  入試: [
+    "入試", "募集要項", "受験",
+    "選抜", "募集人数"
+  ],
+  学費: [
+    "学費", "授業料", "入学金",
+    "納入金"
+  ],
+  学校行事: [
+    "学校行事", "文化祭", "体育祭",
+    "修学旅行", "行事予定"
+  ],
+  アクセス: [
+    "アクセス", "所在地", "住所",
+    "交通", "地図", "電話番号"
+  ],
+  学校概要: [
+    "学校概要", "学校紹介", "教育方針",
+    "特色", "沿革", "校長"
+  ]
+};
+
+// =====================================
+// URLの安全確認
+// =====================================
+
+function normalizeUrl(value, base = SCHOOL_URL) {
+  try {
+    const url = new URL(value, base);
+
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== SCHOOL_HOST ||
+      url.username ||
+      url.password
+    ) {
+      return null;
+    }
+
+    url.hash = "";
+
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+// =====================================
+// HTMLをテキストに変換
+// =====================================
+
+function decodeHtml(text) {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function htmlToText(html) {
+  return decodeHtml(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+      .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-zA-Z0-9#]+;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+// =====================================
+// HTMLリンクとPDFリンクを抽出
+// =====================================
+
+function extractLinks(html, baseUrl) {
+  const links = [];
+  const pdfs = [];
+
+  const regex =
+    /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+  let match;
+
+  while ((match = regex.exec(html)) !== null) {
+    const url = normalizeUrl(match[1], baseUrl);
+
+    if (!url) continue;
+
+    const title = htmlToText(match[2]);
+
+    if (!title || title.length < 2) continue;
+
+    if (/\.pdf(?:$|[?#])/i.test(url)) {
+      pdfs.push({ title, url });
+      continue;
+    }
+
+    if (/\.(jpg|jpeg|png|gif|zip|xlsx?|docx?)$/i.test(url)) {
+      continue;
+    }
+
+    links.push({ title, url });
+  }
+
+  return {
+    links: [
+      ...new Map(links.map(item => [item.url, item])).values()
+    ],
+    pdfs: [
+      ...new Map(pdfs.map(item => [item.url, item])).values()
+    ]
+  };
+}
+
+// =====================================
+// 関連度判定 rankLinks
+// =====================================
+
+function rankLinks(links, question, category) {
+  const questionTerms = String(question || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[\s、。？！?・]+/)
+    .filter(word => word.length >= 2);
+
+  const categoryTerms =
+    CATEGORY_TERMS[category] || [];
+
+  const terms = [
+    ...new Set([...categoryTerms, ...questionTerms])
+  ];
+
+  const patterns = {
+    学科: /学科|各科紹介/,
+    部活動: /部活動|クラブ|部紹介/,
+    資格: /資格|検定/,
+    進路: /進路|就職|進学/,
+    入試: /入試|募集要項|選抜/,
+    学費: /学費|授業料|納入金/,
+    学校行事: /行事|文化祭|体育祭/,
+    アクセス: /アクセス|交通|所在地|地図/,
+    学校概要: /学校紹介|学校概要|教育方針|沿革/
+  };
+
+  return links
+    .map(link => {
+      const title = String(link.title || "")
+        .normalize("NFKC")
+        .toLowerCase();
+
+      const url = String(link.url || "")
+        .toLowerCase();
+
+      let score = 0;
+
+      for (const term of terms) {
+        const keyword = term.toLowerCase();
+
+        if (title.includes(keyword)) score += 15;
+        if (url.includes(keyword)) score += 5;
+      }
+
+      if (patterns[category]?.test(title)) {
+        score += 40;
+      }
+
+      if (/八工news|ニュース/i.test(title)) {
+        score += 5;
+      }
+
+      return { ...link, score };
+    })
+    .filter(item => item.score >= 15)
+    .sort((a, b) => b.score - a.score);
+}
+
+// =====================================
+// 公式ページ取得
+// =====================================
+
+async function fetchPage(url) {
+  try {
+    const safeUrl = normalizeUrl(url);
+
+    if (!safeUrl) return null;
+
+    const response = await fetch(safeUrl, {
+      headers: {
+        "User-Agent": "school-information-bot/1.0",
+        "Accept": "text/html"
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+
+    const finalUrl = normalizeUrl(response.url);
+
+    if (!response.ok || !finalUrl) {
+      return null;
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (!contentType.toLowerCase().includes("text/html")) {
+      return null;
+    }
+
+    const html = await response.text();
+
+    if (html.length > 1500000) {
+      return null;
+    }
+
+    return {
+      html,
+      text: htmlToText(html),
+      url: finalUrl
+    };
+  } catch (error) {
+    console.error(
+      "公式ページ取得エラー:",
+      url,
+      error.message
+    );
+
+    return null;
+  }
+}
+
+// =====================================
+// メイン検索関数
+// =====================================
 
 export async function searchOfficialWebsite(
   question,
@@ -27,9 +288,7 @@ export async function searchOfficialWebsite(
   const results = [];
   const pdfMap = new Map();
 
-  // ===================================
-  // ① 公式サイトを自動巡回
-  // ===================================
+  // ① HTML巡回
 
   while (
     queue.length > 0 &&
@@ -71,7 +330,6 @@ export async function searchOfficialWebsite(
       page.url
     );
 
-    // PDF候補を保存
     for (const pdf of extracted.pdfs) {
       pdfMap.set(pdf.url, pdf);
     }
@@ -100,13 +358,11 @@ export async function searchOfficialWebsite(
     }
   }
 
-  // ===================================
-  // ② PDF本文を取得・解析
-  // ===================================
+  // ② PDF解析
 
   const pdfCandidates = [
     ...pdfMap.values()
-  ].slice(0, 6);
+  ].slice(0, MAX_PDFS);
 
   for (const pdf of pdfCandidates) {
     const extractedPdf =
@@ -117,7 +373,10 @@ export async function searchOfficialWebsite(
     results.push({
       title: pdf.title,
       category,
-      content: extractedPdf.content,
+      content: extractedPdf.content.slice(
+        0,
+        MAX_CONTENT_LENGTH
+      ),
       source: extractedPdf.source,
       source_date: null,
       origin: "official_pdf",
@@ -125,9 +384,7 @@ export async function searchOfficialWebsite(
     });
   }
 
-  // ===================================
-  // ③ HTML・PDFの関連度を評価
-  // ===================================
+  // ③ 本文も含めて関連度評価
 
   const rankedResults = results.map(doc => {
     const ranked = rankLinks(
@@ -161,15 +418,10 @@ export async function searchOfficialWebsite(
       score += 10;
     }
 
-    return {
-      doc,
-      score
-    };
+    return { doc, score };
   });
 
-  // ===================================
   // ④ 関連度順に整理
-  // ===================================
 
   rankedResults.sort(
     (a, b) => b.score - a.score
@@ -180,9 +432,7 @@ export async function searchOfficialWebsite(
     .slice(0, 8)
     .map(item => item.doc);
 
-  // ===================================
-  // ⑤ 学科・部活動などを整理
-  // ===================================
+  // ⑤ 学校資料の分類
 
   const organizedResults =
     organizeSchoolDocuments(finalResults);
@@ -190,6 +440,7 @@ export async function searchOfficialWebsite(
   console.log("公式サイト検索完了:", {
     category,
     visitedPages: visited.size,
+    discoveredPdfs: pdfMap.size,
     htmlResults: results.filter(
       item => item.origin === "official_website"
     ).length,
@@ -201,4 +452,3 @@ export async function searchOfficialWebsite(
 
   return organizedResults;
 }
-
