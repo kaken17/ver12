@@ -1,6 +1,5 @@
 
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
