@@ -29,60 +29,148 @@ const CATEGORY_INSTRUCTIONS = {
   学校概要: "学校の歴史、教育方針、特色を説明してください。"
 };
 
+
 // =====================================
-// URLの安全確認
+// 実在する公式URLだけを許可
 // =====================================
 
-function normalizeUrl(value) {
+const OFFICIAL_HOST = "yameth.fku.ed.jp";
+
+function normalizeOfficialUrl(value) {
   try {
     const url = new URL(value);
 
     if (
-      url.protocol !== "https:" &&
-      url.protocol !== "http:"
+      url.protocol !== "https:" ||
+      url.hostname !== OFFICIAL_HOST ||
+      url.username ||
+      url.password
     ) {
       return null;
     }
 
+    url.hash = "";
     return url.href;
+
   } catch {
     return null;
   }
 }
 
 // =====================================
-// 出典整理
+// URLが実際に存在するか確認
 // =====================================
 
-function collectSources(items) {
-  const sources = items
-    .map(item => {
-      const source = normalizeUrl(item.source);
+async function verifyOfficialUrl(value) {
+  const url = normalizeOfficialUrl(value);
 
-      if (!source) return null;
+  if (!url) return null;
+
+  try {
+    let response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(5000)
+    });
+
+    // HEAD非対応の場合はGETで確認
+    if ([403, 405, 501].includes(response.status)) {
+      response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Range: "bytes=0-0"
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(5000)
+      });
+
+      await response.body?.cancel();
+    }
+
+    const finalUrl = normalizeOfficialUrl(
+      response.url || url
+    );
+
+    if (!response.ok || !finalUrl) {
+      return null;
+    }
+
+    return finalUrl;
+
+  } catch (error) {
+    console.error(
+      "URL確認エラー:",
+      url,
+      error.message
+    );
+
+    return null;
+  }
+}
+
+// =====================================
+// 出典を検証して整理
+// =====================================
+
+async function collectSources(items) {
+  const uniqueItems = [
+    ...new Map(
+      items
+        .filter(item => item.source)
+        .map(item => [item.source, item])
+    ).values()
+  ].slice(0, 8);
+
+  const checked = await Promise.all(
+    uniqueItems.map(async item => {
+      const verifiedUrl =
+        await verifyOfficialUrl(item.source);
+
+      if (!verifiedUrl) return null;
 
       return {
-        title: item.title || "学校資料",
-        source,
+        title: item.title || "学校公式資料",
+        source: verifiedUrl,
         category: item.category || "学校情報",
         source_date: item.source_date || null
       };
     })
-    .filter(Boolean);
+  );
 
-  return [
-    ...new Map(
-      sources.map(item => [item.source, item])
-    ).values()
-  ];
+  return checked.filter(Boolean);
 }
 
 // =====================================
-// 出典追加
+// AIが生成したURLを除去
+// =====================================
+
+function sanitizeAnswer(answer) {
+  return String(answer)
+    // Markdown形式のリンクを除去
+    .replace(
+      /\[([^\]]*)\]\(https?:\/\/[^)\s]+(?:\s+"[^"]*")?\)/g,
+      "$1"
+    )
+    // HTMLリンクを除去
+    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, "")
+    // 生のURLを除去
+    .replace(/https?:\/\/[^\s<>"）]+/g, "")
+    // AIが作った参考資料欄を除去
+    .replace(
+      /(?:^|\n)#{1,3}\s*(?:参考資料|参考文献|出典|参考サイト)[\s\S]*$/i,
+      ""
+    )
+    .trim();
+}
+
+// =====================================
+// サーバーが確認した出典だけを追加
 // =====================================
 
 function appendSources(answer, sources) {
-  if (!sources.length) return answer;
+  if (!sources.length) {
+    return answer;
+  }
 
   const referenceText = sources
     .map(item =>
@@ -92,7 +180,7 @@ function appendSources(answer, sources) {
 
   return (
     answer.trim() +
-    "\n\n## 参考資料\n\n" +
+    "\n\n## 参考資料（公式サイトで確認済み）\n\n" +
     referenceText
   );
 }
@@ -499,12 +587,19 @@ ${context}
 
     currentStage = "出典整理";
 
-    const sources = collectSources(schoolSources);
+    // AIが勝手に作ったリンクを除去
+const cleanAnswer = sanitizeAnswer(answer);
 
-    const finalAnswer = appendSources(
-      answer,
-      sources
-    );
+// 実在確認した公式リンクだけを取得
+const sources = await collectSources(
+  schoolSources
+);
+
+// 出典を追加
+const finalAnswer = appendSources(
+  cleanAnswer,
+  sources
+);
 
     // ⑫ 正常終了
 
