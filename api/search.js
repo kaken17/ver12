@@ -340,12 +340,39 @@ export async function searchSchoolData(question) {
 
   const supabase = getSupabase();
 
-  const { data, error } = await supabase
+  
+const PAGE_SIZE = 500;
+const MAX_DOCUMENTS = 5000;
+
+let data = [];
+let offset = 0;
+
+while (offset < MAX_DOCUMENTS) {
+  const { data: page, error } = await supabase
     .from("school_documents")
     .select(
       "url, title, category, content, source_date, fetched_at"
     )
-    .limit(500);
+    .order("fetched_at", { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1);
+
+  if (error) {
+    console.error(
+      "Supabase検索エラー:",
+      error.message
+    );
+    throw new Error("学校資料の検索に失敗しました");
+  }
+
+  if (!page || page.length === 0) break;
+
+  data.push(...page);
+
+  if (page.length < PAGE_SIZE) break;
+
+  offset += PAGE_SIZE;
+}
+
 
   if (error) {
     console.error("Supabase検索エラー:", error.message);
@@ -366,36 +393,25 @@ export async function searchSchoolData(question) {
 
   const profile = makeQueryProfile(question);
 
-  // 関連度を計算
-  const ranked = documents
-    .map(doc => ({
-      doc,
-      score: scoreDocument(doc, profile)
-    }))
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score);
+ 
+const ranked = documents
+  .map(doc => ({
+    doc,
+    score: scoreDocument(doc, profile)
+  }))
+  .filter(item => item.score >= 5)
+  .sort((a, b) => b.score - a.score);
 
-  // 最大5件
-  const results = ranked.slice(0, 5);
+// 最大8件
+const results = ranked.slice(0, 8);
 
-  console.log("学校資料検索結果:", {
-    category: profile.category,
-    totalDocuments: documents.length,
-    query: profile.cleaned,
-    matchedDocuments: ranked.length,
-    returnedDocuments: results.length,
-    selected: results.map(({ doc, score }) => ({
-      title: doc.title,
-      category: doc.category,
-      score
-    }))
-  });
+// 検索結果がない場合は無理に資料を選ばない
+return results.map(({ doc }) => ({
+  title: doc.title || "タイトル不明",
+  category: doc.category || "学校情報",
+  content: doc.content,
+  source: doc.url || "",
+  source_date: doc.source_date || null
+}));
 
-  return results.map(({ doc }) => ({
-    title: doc.title || "タイトル不明",
-    category: doc.category || "学校情報",
-    content: doc.content,
-    source: doc.url || "",
-    source_date: doc.source_date || null
-  }));
 }
