@@ -347,6 +347,7 @@ const MAX_DOCUMENTS = 5000;
 let data = [];
 let offset = 0;
 
+
 while (offset < MAX_DOCUMENTS) {
   const { data: page, error } = await supabase
     .from("school_documents")
@@ -373,27 +374,20 @@ while (offset < MAX_DOCUMENTS) {
   offset += PAGE_SIZE;
 }
 
+if (!Array.isArray(data) || data.length === 0) {
+  return [];
+}
 
-  if (error) {
-    console.error("Supabase検索エラー:", error.message);
-    throw new Error("学校資料の検索に失敗しました");
-  }
+// 空資料を除外
+const documents = prepareDocuments(
+  data.filter(doc =>
+    typeof doc.content === "string" &&
+    doc.content.trim().length > 0
+  )
+);
 
-  if (!Array.isArray(data) || data.length === 0) {
-    return [];
-  }
+const profile = makeQueryProfile(question);
 
-  // 空資料を除外
-  const documents = prepareDocuments(
-    data.filter(doc =>
-      typeof doc.content === "string" &&
-      doc.content.trim().length > 0
-    )
-  );
-
-  const profile = makeQueryProfile(question);
-
- 
 const ranked = documents
   .map(doc => ({
     doc,
@@ -405,7 +399,6 @@ const ranked = documents
 // 最大8件
 const results = ranked.slice(0, 8);
 
-// 検索結果がない場合は無理に資料を選ばない
 return results.map(({ doc }) => ({
   title: doc.title || "タイトル不明",
   category: doc.category || "学校情報",
@@ -413,5 +406,3 @@ return results.map(({ doc }) => ({
   source: doc.url || "",
   source_date: doc.source_date || null
 }));
-
-}
