@@ -147,59 +147,86 @@ function extractLinks(html, baseUrl) {
 // =====================================
 
 function rankLinks(links, question, category) {
+  const normalizedQuestion = String(question)
+    .normalize("NFKC")
+    .toLowerCase();
+
+  const categoryTerms =
+    CATEGORY_TERMS[category] || [];
+
+  const questionTerms = normalizedQuestion
+    .split(/[\s、。？！?・]+/)
+    .filter(word => word.length >= 2);
+
   const terms = [
-    ...(CATEGORY_TERMS[category] || []),
-    ...String(question)
-      .normalize("NFKC")
-      .split(/[\s、。？！?]+/)
-      .filter(word => word.length >= 2)
+    ...new Set([
+      ...categoryTerms,
+      ...questionTerms
+    ])
   ];
 
   return links
     .map(link => {
-      const text = (
-        link.title + " " + link.url
-      ).toLowerCase();
+      const title = String(link.title || "")
+        .normalize("NFKC")
+        .toLowerCase();
+
+      const url = String(link.url || "")
+        .toLowerCase();
 
       let score = 0;
 
+      // タイトル一致を最優先
       for (const term of terms) {
-        if (text.includes(term.toLowerCase())) {
-          score += term.length >= 4 ? 10 : 5;
+        const keyword = term.toLowerCase();
+
+        if (title.includes(keyword)) {
+          score += 15;
+        }
+
+        if (url.includes(keyword)) {
+          score += 5;
         }
       }
 
-      // 学校情報の主要ページを優先
-      if (/学科|各科紹介/.test(link.title)) {
-        if (category === "学科") score += 30;
+      // カテゴリー別の優先順位
+      const priorityPatterns = {
+        学科: /学科|各科紹介|学科紹介/,
+        部活動: /部活動|クラブ|部紹介/,
+        資格: /資格|検定/,
+        進路: /進路|就職|進学/,
+        入試: /入試|募集要項|選抜/,
+        学費: /学費|授業料|納入金/,
+        学校行事: /行事|文化祭|体育祭/,
+        アクセス: /アクセス|交通|所在地|地図/,
+        学校概要: /学校紹介|学校概要|教育方針|沿革/
+      };
+
+      const pattern = priorityPatterns[category];
+
+      if (pattern?.test(title)) {
+        score += 40;
       }
 
-      if (/部活動|工業系大会/.test(link.title)) {
-        if (category === "部活動") score += 30;
+      // 学科比較の補強
+      if (
+        category === "学科" &&
+        /電子機械|it自動車|自動車|電気|情報技術|土木|工業化学/i.test(title)
+      ) {
+        score += 25;
       }
 
-      if (/進路/.test(link.title)) {
-        if (category === "進路") score += 30;
+      // 八工NEWSは補助的に扱う
+      if (/八工news|ニュース/i.test(title)) {
+        score += 5;
       }
 
-      if (/八工news|ニュース/i.test(link.title)) {
-        score += 10;
-      }
-if (category === "アクセス") {
-  if (/アクセス|交通|地図/.test(link.title)) {
-    score += 40;
-  }
-
-  if (/駐車場|交通機関|所在地/.test(link.title)) {
-    score += 25;
-  }
-}
       return {
         ...link,
         score
       };
     })
-    .filter(item => item.score > 0)
+    .filter(item => item.score >= 15)
     .sort((a, b) => b.score - a.score);
 }
 
@@ -380,9 +407,10 @@ export async function searchOfficialWebsite(
     })
     .sort((a, b) => b.score - a.score);
 
-  const finalResults = rankedResults
-    .slice(0, 8)
-    .map(item => item.doc);
+ const finalResults = rankedResults
+  .filter(item => item.score >= 15)
+  .slice(0, 8)
+  .map(item => item.doc);
 
   console.log("公式サイト検索完了:", {
     category,
