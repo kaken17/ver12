@@ -377,6 +377,25 @@ const SYSTEM_PROMPT = `
 住所と電話番号だけで回答を終わらせず、
 利用者が実際に学校へ訪問するために必要な情報を整理する。
 
+【今回取得した資料の利用について】
+
+1. 今回渡された参考資料を必ず確認してください。
+
+2. 公式サイトの検索結果とSupabase保存資料の
+   両方に目を通してください。
+
+3. 質問に関連する情報が公式サイトの検索結果に
+   存在する場合は、その情報を優先してください。
+
+4. Supabaseに保存された過去の資料も活用してください。
+
+5. 資料の内容を確認せずに、
+   「資料がありません」と回答してはいけません。
+
+6. 資料に書かれている事実と推測を区別してください。
+
+7. 複数の資料に矛盾がある場合は、
+   その違いを説明してください。
 `.trim();
 
 // =====================================
@@ -472,56 +491,92 @@ const webSchoolSources =
     category
   );
 
-// ③ 検索結果を統合
-const sourceMap = new Map();
 
-for (const item of [
-  ...databaseSources,
-  ...webSchoolSources
-]) {
-  if (item.source) {
-    sourceMap.set(item.source, item);
-  }
-}
+    // ③ 検索結果を統合
 
-const schoolSources = [
-  ...sourceMap.values()
-];
+    const sourceMap = new Map();
 
-console.log("統合検索結果:", {
-  category,
-  databaseCount: databaseSources.length,
-  officialWebCount: webSchoolSources.length,
-  totalCount: schoolSources.length
-});
-
-    if (!Array.isArray(schoolSources)) {
-      throw new Error(
-        "学校資料検索の戻り値が配列ではありません"
-      );
+    // 公式サイトの最新情報を優先
+    for (const item of webSchoolSources) {
+      if (item.source && item.content) {
+        sourceMap.set(item.source, {
+          ...item,
+          origin: item.origin || "official_website"
+        });
+      }
     }
 
-    console.log("学校資料検索:", {
+    // Supabaseの蓄積資料を追加
+    for (const item of databaseSources) {
+      if (!item.source || !item.content) continue;
+
+      if (!sourceMap.has(item.source)) {
+        sourceMap.set(item.source, {
+          ...item,
+          origin: "supabase"
+        });
+      }
+    }
+
+    const schoolSources = [
+      ...sourceMap.values()
+    ];
+
+    // 公式サイトとSupabaseの両方から資料を選択
+    const officialSources = schoolSources.filter(
+      item => item.origin !== "supabase"
+    );
+
+    const databaseOnlySources = schoolSources.filter(
+      item => item.origin === "supabase"
+    );
+
+    const selectedSources = [
+      ...officialSources.slice(0, 5),
+      ...databaseOnlySources.slice(0, 5)
+    ].slice(0, 10);
+
+    console.log("検索結果統合:", {
       category,
-      count: schoolSources.length
+      databaseCount: databaseSources.length,
+      officialWebCount: webSchoolSources.length,
+      totalCount: schoolSources.length,
+      selectedCount: selectedSources.length,
+      selectedTitles: selectedSources.map(
+        item => item.title
+      )
     });
 
-    // ⑤ 資料なし
+    // ④ AIに渡す資料を作成
 
-    if (schoolSources.length === 0) {
-      return res.status(200).json({
-        answer:
-          "申し訳ありません。今回の質問に関係する学校資料を見つけられませんでした。別の言葉で質問するか、学校の公式サイトをご確認ください。",
-        category,
-        sources: [],
-        webSources:  webSchoolSources.length,
-        model: FREE_MODEL
-      });
+    const context = selectedSources
+      .map((item, index) => {
+        return [
+          `【参考資料${index + 1}】`,
+          `情報源：${
+            item.origin === "supabase"
+              ? "Supabase保存資料"
+              : "学校公式サイトの検索結果"
+          }`,
+          `タイトル：${item.title || "不明"}`,
+          `分類：${item.category || "不明"}`,
+          `更新日：${item.source_date || "不明"}`,
+          `URL：${item.source || "不明"}`,
+          `本文：${String(item.content || "").slice(0, 4500)}`
+        ].join("\n");
+      })
+      .join("\n\n");
+
+    console.log("AI資料受け渡し:", {
+      documentCount: selectedSources.length,
+      contextCharacters: context.length,
+      officialCount: officialSources.length,
+      supabaseCount: databaseOnlySources.length
+    });
+
+    if (!context.trim()) {
+      throw new Error("AIに渡す学校資料がありません");
     }
-
-    // ⑥ 資料整理
-
-    currentStage = "資料整理";
 
     const context = schoolSources
       .map((item, index) => {
