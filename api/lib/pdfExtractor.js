@@ -1,5 +1,5 @@
 
-import pdfParse from "pdf-parse";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const SCHOOL_HOST = "yameth.fku.ed.jp";
 
@@ -52,15 +52,10 @@ function validatePdfText(text) {
     return false;
   }
 
-  // 日本語または英数字が含まれているか
   const meaningfulCharacters =
     text.match(/[ぁ-んァ-ヶ一-龠a-zA-Z0-9]/g) || [];
 
-  if (meaningfulCharacters.length < 20) {
-    return false;
-  }
-
-  return true;
+  return meaningfulCharacters.length >= 20;
 }
 
 // =====================================
@@ -68,8 +63,9 @@ function validatePdfText(text) {
 // =====================================
 
 export async function extractOfficialPdf(url) {
-  try {
+  let loadingTask;
 
+  try {
     // ① URL確認
     if (!isOfficialPdfUrl(url)) {
       console.warn("公式PDF以外を拒否:", url);
@@ -78,21 +74,24 @@ export async function extractOfficialPdf(url) {
 
     // ② PDF取得
     const response = await fetch(url, {
-      redirect: "follow",
+      redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: {
         Accept: "application/pdf"
       }
     });
 
-    // ③ リダイレクト先確認
-    if (!response.ok) {
-      console.warn("PDF取得失敗:", response.status);
+    // ③ リダイレクト拒否
+    if (
+      response.status >= 300 &&
+      response.status < 400
+    ) {
+      console.warn("PDFのリダイレクトを拒否:", url);
       return null;
     }
 
-    if (!isOfficialPdfUrl(response.url)) {
-      console.warn("PDFのリダイレクト先が不正:", response.url);
+    if (!response.ok) {
+      console.warn("PDF取得失敗:", response.status);
       return null;
     }
 
@@ -115,7 +114,7 @@ export async function extractOfficialPdf(url) {
       return null;
     }
 
-    // ⑥ バッファ取得
+    // ⑥ PDFバッファ取得
     const buffer = Buffer.from(
       await response.arrayBuffer()
     );
@@ -129,17 +128,53 @@ export async function extractOfficialPdf(url) {
       return null;
     }
 
-    // ⑦ PDF解析
-    const parsedPdf = await pdfParse(buffer, {
-      max: MAX_PAGES
+    // ⑦ PDF.jsで解析
+    loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      isEvalSupported: false,
+      disableFontFace: true,
+      verbosity: 0
     });
 
-    // ⑧ 本文整形
-    const content = cleanPdfText(
-      parsedPdf.text
+    const document = await loadingTask.promise;
+
+    // ⑧ ページ数制限
+    const totalPages = document.numPages;
+    const pagesToRead = Math.min(
+      totalPages,
+      MAX_PAGES
     );
 
-    // ⑨ 本文品質確認
+    const pageTexts = [];
+
+    // ⑨ ページごとに本文抽出
+    for (let pageNumber = 1;
+      pageNumber <= pagesToRead;
+      pageNumber++
+    ) {
+      const page = await document.getPage(pageNumber);
+
+      try {
+        const textContent = await page.getTextContent();
+
+        const pageText = textContent.items
+          .map(item => item.str || "")
+          .join(" ");
+
+        pageTexts.push(pageText);
+
+      } finally {
+        page.cleanup();
+      }
+    }
+
+    // ⑩ 本文整形
+    const content = cleanPdfText(
+      pageTexts.join("\n")
+    );
+
+    // ⑪ 本文品質確認
     if (!validatePdfText(content)) {
       console.warn("PDF本文の品質不足:", {
         url,
@@ -149,28 +184,41 @@ export async function extractOfficialPdf(url) {
       return null;
     }
 
-    // ⑩ 解析結果
+    // ⑫ 解析結果
     const result = {
       content,
-      pages: parsedPdf.numpages || 0,
-      source: response.url
+      pages: pagesToRead,
+      totalPages,
+      source: url
     };
 
     console.log("PDF解析成功:", {
       source: result.source,
       pages: result.pages,
+      totalPages: result.totalPages,
       extractedCharacters: result.content.length
     });
 
     return result;
 
   } catch (error) {
-
     console.error("PDF解析エラー:", {
       url,
       message: error.message
     });
 
     return null;
+
+  } finally {
+    if (loadingTask) {
+      try {
+        await loadingTask.destroy();
+      } catch (error) {
+        console.warn(
+          "PDFリソース解放エラー:",
+          error.message
+        );
+      }
+    }
   }
 }
