@@ -22,36 +22,43 @@ function getSupabase() {
 }
 
 // =====================================
-// 質問分類
+// 質問カテゴリー
 // =====================================
 
 const CATEGORY_KEYWORDS = {
   学科: [
     "学科", "専門学科", "コース",
-    "電子機械", "自動車科", "電気科",
-    "情報技術", "土木科", "工業化学",
-    "何を学ぶ", "何を勉強"
+    "電子機械", "自動車科", "it自動車",
+    "電気科", "情報技術", "土木科",
+    "工業化学", "学習内容", "専門科目",
+    "実習内容", "何を学ぶ", "何を勉強",
+    "特徴", "違い", "比較"
   ],
 
   部活動: [
     "部活", "部活動", "クラブ",
     "運動部", "文化部", "同好会",
-    "野球", "サッカー", "吹奏楽"
+    "野球", "サッカー", "ラグビー",
+    "弓道", "陸上", "剣道", "卓球",
+    "吹奏楽", "研究部", "eスポーツ"
   ],
 
   資格: [
     "資格", "検定", "取得",
-    "国家資格", "合格"
+    "国家資格", "合格", "電気工事士",
+    "自動車整備士", "itパスポート"
   ],
 
   進路: [
     "進路", "就職", "進学",
-    "大学", "就職先", "卒業後"
+    "大学", "就職先", "卒業後",
+    "企業", "求人", "内定"
   ],
 
   入試: [
     "入試", "受験", "募集要項",
-    "出願", "入学者選抜", "試験日"
+    "出願", "入学者選抜", "試験日",
+    "募集人数", "倍率"
   ],
 
   学費: [
@@ -71,39 +78,13 @@ const CATEGORY_KEYWORDS = {
 
   学校概要: [
     "学校概要", "学校紹介", "特徴",
-    "特色", "教育方針", "歴史"
+    "特色", "教育方針", "歴史",
+    "学校生活", "校長"
   ]
 };
 
-export function classifyQuestion(question) {
-  const q = normalize(question);
-
-  // より具体的な分類を優先
-  const priority = [
-    "入試",
-    "学費",
-    "資格",
-    "進路",
-    "部活動",
-    "学校行事",
-    "アクセス",
-    "学科",
-    "学校概要"
-  ];
-
-  for (const category of priority) {
-    const matched = CATEGORY_KEYWORDS[category].some(
-      word => q.includes(normalize(word))
-    );
-
-    if (matched) return category;
-  }
-
-  return "学校概要";
-}
-
 // =====================================
-// 文字列の正規化
+// 正規化
 // =====================================
 
 function normalize(text = "") {
@@ -117,7 +98,83 @@ function normalize(text = "") {
 }
 
 // =====================================
-// 不要な言葉を除去
+// 質問分類
+// =====================================
+
+export function classifyQuestion(question) {
+  const q = normalize(question);
+
+  const priority = [
+    "入試",
+    "学費",
+    "資格",
+    "進路",
+    "部活動",
+    "学校行事",
+    "アクセス",
+    "学科",
+    "学校概要"
+  ];
+
+  for (const category of priority) {
+    const words = CATEGORY_KEYWORDS[category];
+
+    if (
+      words.some(word =>
+        q.includes(normalize(word))
+      )
+    ) {
+      return category;
+    }
+  }
+
+  return "学校概要";
+}
+
+// =====================================
+// 質問の意図を判定
+// =====================================
+
+function detectIntent(question) {
+  const q = normalize(question);
+
+  return {
+    departmentComparison:
+      /6学科|全学科|各学科|学科.*比較|学科.*特徴|学科.*違い|どの学科/.test(q),
+
+    departmentDetail:
+      /電子機械科|it自動車科|自動車科|電気科|情報技術科|土木科|工業化学科/.test(q),
+
+    clubList:
+      /部活動一覧|部活一覧|部活動.*教えて|部活.*教えて|どんな部活|何部/.test(q),
+
+    qualification:
+      /資格|検定|取得/.test(q),
+
+    career:
+      /進路|就職|進学|大学|企業/.test(q),
+
+    entrance:
+      /入試|受験|募集要項|出願|選抜/.test(q)
+  };
+}
+
+// =====================================
+// 学科名
+// =====================================
+
+const DEPARTMENTS = [
+  "電子機械科",
+  "it自動車科",
+  "自動車科",
+  "電気科",
+  "情報技術科",
+  "土木科",
+  "工業化学科"
+];
+
+// =====================================
+// 不要な表現を除去
 // =====================================
 
 const STOP_PHRASES = [
@@ -162,7 +219,7 @@ function cleanQuestion(question) {
 }
 
 // =====================================
-// 資料を検索用に整理
+// 検索用資料の準備
 // =====================================
 
 function prepareDocuments(documents) {
@@ -178,37 +235,14 @@ function prepareDocuments(documents) {
 }
 
 // =====================================
-// カテゴリー別の検索対象
-// =====================================
-
-const CATEGORY_PATTERNS = {
-  学科: /学科|電子機械|自動車|電気科|情報技術|土木科|工業化学|教育課程|専門科目/,
-
-  部活動: /部活動|運動部|文化部|同好会|野球|サッカー|吹奏楽|バスケット/,
-
-  資格: /資格|検定|取得|合格|国家資格/,
-
-  進路: /進路|就職|進学|大学|卒業後|内定/,
-
-  入試: /入試|受験|募集要項|出願|選抜|募集人数/,
-
-  学費: /学費|授業料|入学金|教材費|納入金/,
-
-  学校行事: /学校行事|文化祭|体育祭|修学旅行|イベント/,
-
-  アクセス: /アクセス|所在地|住所|交通|最寄り駅/,
-
-  学校概要: /学校概要|学校紹介|教育方針|特色|沿革|校長挨拶/
-};
-
-// =====================================
-// 検索語の作成
+// 検索プロフィール
 // =====================================
 
 function makeQueryProfile(question) {
   const normalized = normalize(question);
   const cleaned = cleanQuestion(question);
   const category = classifyQuestion(question);
+  const intent = detectIntent(question);
 
   const keywords = CATEGORY_KEYWORDS[category] || [];
 
@@ -218,13 +252,12 @@ function makeQueryProfile(question) {
 
   const grams = new Set();
 
-  // 質問の文字列から2〜3文字の検索語を作成
+  // 2〜3文字の検索語
   for (const size of [2, 3]) {
     for (let i = 0; i <= cleaned.length - size; i++) {
       const gram = cleaned.slice(i, i + size);
 
       if (
-        gram.length >= 2 &&
         !["です", "ます", "した", "こと", "から", "まで"].includes(gram)
       ) {
         grams.add(gram);
@@ -232,16 +265,22 @@ function makeQueryProfile(question) {
     }
   }
 
-  // カテゴリーの検索語を追加
   for (const word of matchedKeywords) {
     grams.add(normalize(word));
   }
+
+  // 質問に含まれる学科名を取得
+  const departmentNames = DEPARTMENTS.filter(name =>
+    normalized.includes(normalize(name))
+  );
 
   return {
     normalized,
     cleaned,
     category,
-    grams: [...grams]
+    intent,
+    grams: [...grams],
+    departmentNames
   };
 }
 
@@ -273,7 +312,6 @@ function countOccurrences(text, term) {
 // 資料の関連度を計算
 // =====================================
 
-
 function scoreDocument(doc, profile) {
   let score = 0;
 
@@ -281,33 +319,127 @@ function scoreDocument(doc, profile) {
   const category = doc.normalizedCategory;
   const content = doc.normalizedContent;
 
-  // 質問の重要語を優先
-  const terms = profile.grams.filter(
-    term => term.length >= 2
-  );
+  const intent = profile.intent;
 
-  for (const term of terms) {
-    if (title.includes(term)) score += 12;
-    if (category.includes(term)) score += 8;
-    if (content.includes(term)) score += 2;
+  // -----------------------------------
+  // ① カテゴリー一致を最優先
+  // -----------------------------------
+
+  if (category === normalize(profile.category)) {
+    score += 100;
   }
 
-  // カテゴリー一致
-  const pattern = CATEGORY_PATTERNS[profile.category];
+  // -----------------------------------
+  // ② タイトル一致
+  // -----------------------------------
 
-  if (pattern?.test(title)) score += 25;
-  if (pattern?.test(category)) score += 20;
-  if (pattern?.test(content)) score += 5;
+  for (const term of profile.grams) {
+    if (term.length < 2) continue;
 
-  // 質問全体との一致
+    if (title.includes(term)) {
+      score += 12;
+    }
+
+    if (category.includes(term)) {
+      score += 8;
+    }
+
+    const occurrences = countOccurrences(
+      content,
+      term
+    );
+
+    score += Math.min(occurrences, 3) * 2;
+  }
+
+  // -----------------------------------
+  // ③ 質問全体との一致
+  // -----------------------------------
+
   if (
     profile.cleaned.length >= 3 &&
     title.includes(profile.cleaned)
   ) {
-    score += 30;
+    score += 40;
   }
 
-  // 年度が新しい資料を優先
+  // -----------------------------------
+  // ④ 学科比較
+  // -----------------------------------
+
+  if (intent.departmentComparison) {
+    if (category === "学科") {
+      score += 200;
+    }
+
+    if (title.includes("学科紹介")) {
+      score += 30;
+    }
+
+    if (
+      DEPARTMENTS.some(name =>
+        title.includes(normalize(name))
+      )
+    ) {
+      score += 20;
+    }
+  }
+
+  // -----------------------------------
+  // ⑤ 特定学科
+  // -----------------------------------
+
+  if (intent.departmentDetail) {
+    for (const name of profile.departmentNames) {
+      const normalizedName = normalize(name);
+
+      if (title.includes(normalizedName)) {
+        score += 150;
+      }
+
+      if (content.includes(normalizedName)) {
+        score += 40;
+      }
+    }
+  }
+
+  // -----------------------------------
+  // ⑥ 部活動
+  // -----------------------------------
+
+  if (profile.category === "部活動") {
+    if (category === "部活動") {
+      score += 200;
+    }
+
+    if (
+      title.includes("部活動一覧") ||
+      title.includes("部活動")
+    ) {
+      score += 50;
+    }
+  }
+
+  // -----------------------------------
+  // ⑦ 資格・進路・入試
+  // -----------------------------------
+
+  if (intent.qualification && category === "資格") {
+    score += 100;
+  }
+
+  if (intent.career && category === "進路") {
+    score += 100;
+  }
+
+  if (intent.entrance && category === "入試") {
+    score += 100;
+  }
+
+  // -----------------------------------
+  // ⑧ 年度の新しさ
+  // -----------------------------------
+
   const date = Date.parse(
     doc.source_date || doc.fetched_at || ""
   );
@@ -317,10 +449,18 @@ function scoreDocument(doc, profile) {
       (Date.now() - date) / 86400000;
 
     if (ageDays >= 0 && ageDays <= 365) {
-      score += 8;
+      score += 15;
     } else if (ageDays > 365 && ageDays <= 730) {
-      score += 4;
+      score += 7;
     }
+  }
+
+  // -----------------------------------
+  // ⑨ 空資料・短すぎる資料を抑制
+  // -----------------------------------
+
+  if (!content || content.length < 30) {
+    score -= 30;
   }
 
   return score;
@@ -340,70 +480,77 @@ export async function searchSchoolData(question) {
 
   const supabase = getSupabase();
 
-  
-const PAGE_SIZE = 500;
-const MAX_DOCUMENTS = 5000;
+  const PAGE_SIZE = 500;
+  const MAX_DOCUMENTS = 5000;
 
-let data = [];
-let offset = 0;
+  let data = [];
+  let offset = 0;
 
+  // -----------------------------------
+  // Supabaseから資料取得
+  // -----------------------------------
 
-while (offset < MAX_DOCUMENTS) {
-  const { data: page, error } = await supabase
-    .from("school_documents")
-    .select(
-      "url, title, category, content, source_date, fetched_at"
-    )
-    .order("fetched_at", { ascending: false })
-    .range(offset, offset + PAGE_SIZE - 1);
+  while (offset < MAX_DOCUMENTS) {
+    const { data: page, error } = await supabase
+      .from("school_documents")
+      .select(
+        "url, title, category, content, source_date, fetched_at"
+      )
+      .order("fetched_at", {
+        ascending: false,
+        nullsFirst: false
+      })
+      .range(
+        offset,
+        offset + PAGE_SIZE - 1
+      );
 
-  if (error) {
-    console.error(
-      "Supabase検索エラー:",
-      error.message
-    );
-    throw new Error("学校資料の検索に失敗しました");
+    if (error) {
+      console.error(
+        "Supabase検索エラー:",
+        error.message
+      );
+
+      throw new Error(
+        "学校資料の検索に失敗しました"
+      );
+    }
+
+    if (!page || page.length === 0) {
+      break;
+    }
+
+    data.push(...page);
+
+    if (page.length < PAGE_SIZE) {
+      break;
+    }
+
+    offset += PAGE_SIZE;
   }
 
-  if (!page || page.length === 0) break;
+  if (!Array.isArray(data) || data.length === 0) {
+    console.log("学校資料が登録されていません");
+    return [];
+  }
 
-  data.push(...page);
+  // -----------------------------------
+  // 空資料を除外
+  // -----------------------------------
 
-  if (page.length < PAGE_SIZE) break;
+  const documents = prepareDocuments(
+    data.filter(doc =>
+      typeof doc.content === "string" &&
+      doc.content.trim().length > 0
+    )
+  );
 
-  offset += PAGE_SIZE;
-}
+  // -----------------------------------
+  // 質問分析
+  // -----------------------------------
 
-if (!Array.isArray(data) || data.length === 0) {
-  return [];
-}
+  const profile = makeQueryProfile(question);
 
-// 空資料を除外
-const documents = prepareDocuments(
-  data.filter(doc =>
-    typeof doc.content === "string" &&
-    doc.content.trim().length > 0
-  )
-);
-
-const profile = makeQueryProfile(question);
-
-const ranked = documents
-  .map(doc => ({
-    doc,
-    score: scoreDocument(doc, profile)
-  }))
-  .filter(item => item.score >= 5)
-  .sort((a, b) => b.score - a.score);
-
-// 最大8件
-const results = ranked.slice(0, 8);
-
-return results.map(({ doc }) => ({
-  title: doc.title || "タイトル不明",
-  category: doc.category || "学校情報",
-  content: doc.content,
-  source: doc.url || "",
-  source_date: doc.source_date || null
-}));
-}
+  console.log("検索プロフィール:", {
+    category: profile.category,
+    intent: profile.intent,
