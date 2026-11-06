@@ -1,7 +1,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import * as cheerio from "cheerio";
-import pdf from "pdf-parse/lib/pdf-parse.js";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const ROOT = "https://yameth.fku.ed.jp/";
 const HOST = new URL(ROOT).hostname;
@@ -141,19 +141,47 @@ async function getPdfBuffer(url) {
 async function getPdfText(url) {
   const buffer = await getPdfBuffer(url);
 
-  const parsed = await pdf(buffer);
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+    isEvalSupported: false
+  });
 
-  const content = (parsed.text || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const document = await loadingTask.promise;
 
-  if (!content) {
-    throw new Error(
-      "PDFから文章を抽出できません。画像形式のPDFの可能性があります"
-    );
+  const pages = [];
+
+  try {
+    for (let i = 1; i <= document.numPages; i++) {
+      const page = await document.getPage(i);
+
+      const textContent = await page.getTextContent();
+
+      const pageText = textContent.items
+        .map(item => item.str || "")
+        .join(" ");
+
+      pages.push(pageText);
+
+      page.cleanup();
+    }
+
+    const content = pages
+      .join("\n")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!content) {
+      throw new Error(
+        "PDFから文章を抽出できません。画像形式のPDFの可能性があります"
+      );
+    }
+
+    return content;
+
+  } finally {
+    await document.destroy();
   }
-
-  return content;
 }
 
 // PDF判定
