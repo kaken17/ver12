@@ -1,6 +1,18 @@
 
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
+
+const workerPath = require.resolve(
+  "pdfjs-dist/legacy/build/pdf.worker.mjs"
+);
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  pathToFileURL(workerPath).href;
 const SCHOOL_HOST = "yameth.fku.ed.jp";
 
 const MAX_PDF_SIZE = 8 * 1024 * 1024;
