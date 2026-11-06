@@ -1,5 +1,8 @@
 
 import "./style.css";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+import "./style.css";
 
 // HTMLの部品を取得
 const form = document.querySelector("#chat-form");
@@ -230,7 +233,10 @@ async function askAI(question) {
     const answer = data.answer.trim();
 
     // 回答を表示
-    loadingBubble.textContent = answer;
+    const html = marked.parse(answer);
+
+loadingBubble.innerHTML =
+  DOMPurify.sanitize(html);
 
     // 出典リンクを回答の下に表示
     addSourcesToBubble(
