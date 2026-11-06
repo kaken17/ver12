@@ -166,7 +166,6 @@ function detectIntent(question) {
 const DEPARTMENTS = [
   "電子機械科",
   "it自動車科",
-  "自動車科",
   "電気科",
   "情報技術科",
   "土木科",
