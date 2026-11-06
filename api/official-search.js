@@ -1,6 +1,11 @@
 
 const SCHOOL_URL = "https://yameth.fku.ed.jp/";
 const SCHOOL_HOST = "yameth.fku.ed.jp";
+import { extractOfficialPdf } from "./pdfExtractor.js";
+
+import {
+  organizeSchoolDocuments
+} from "./schoolOrganizer.js";
 
 const MAX_PAGES = 15;
 const MAX_DEPTH = 3;
@@ -383,6 +388,38 @@ export async function searchOfficialWebsite(
       foundPdfs: extracted.pdfs.length,
       visitedPages: visited.size
     });
+    
+  // ===================================
+  // PDF本文を自動取得
+  // ===================================
+
+  const pdfCandidates = [
+    ...pdfMap.values()
+  ].slice(0, 6);
+
+  for (const pdf of pdfCandidates) {
+    const extractedPdf =
+      await extractOfficialPdf(pdf.url);
+
+    if (!extractedPdf) continue;
+
+    results.push({
+      title: pdf.title,
+      category,
+      content: extractedPdf.content,
+      source: extractedPdf.source,
+      source_date: null,
+      origin: "official_pdf",
+      depth: 1
+    });
+
+    console.log("PDF解析成功:", {
+      title: pdf.title,
+      pages: extractedPdf.pages,
+      characters: extractedPdf.content.length
+    });
+  }
+
   }
 
   // ===================================
@@ -407,20 +444,13 @@ export async function searchOfficialWebsite(
     })
     .sort((a, b) => b.score - a.score);
 
- const finalResults = rankedResults
-  .filter(item => item.score >= 15)
-  .slice(0, 8)
-  .map(item => item.doc);
-
-  console.log("公式サイト検索完了:", {
-    category,
-    visitedPages: visited.size,
-    htmlResults: finalResults.length,
-    discoveredPdfs: pdfMap.size,
-    resultTitles: finalResults.map(
-      item => item.title
-    )
-  });
-
-  return finalResults;
+    const finalResults = rankedResults
+    .filter(item => item.score >= 15)
+    .slice(0, 8)
+    .map(item => item.doc);
+  
+  const organizedResults =
+    organizeSchoolDocuments(finalResults);
+  
+  return organizedResults;
 }
