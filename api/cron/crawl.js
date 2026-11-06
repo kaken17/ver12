@@ -1,7 +1,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import * as cheerio from "cheerio";
-import pdf from "pdf-parse/lib/pdf-parse.js";
+import pdf from "pdf-parse";
 
 const ROOT = "https://yameth.fku.ed.jp/";
 const HOST = new URL(ROOT).hostname;
