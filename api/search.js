@@ -406,3 +406,4 @@ return results.map(({ doc }) => ({
   source: doc.url || "",
   source_date: doc.source_date || null
 }));
+}
