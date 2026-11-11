@@ -8,7 +8,7 @@ const SCHOOL_URL = "https://yameth.fku.ed.jp/";
 const SCHOOL_HOST = "yameth.fku.ed.jp";
 
 const MAX_PAGES = 15;
-const MAX_DEPTH = 3;
+const MAX_DEPTH = 5;
 const MAX_CONTENT_LENGTH = 10000;
 const MAX_PDFS = 6;
 const TIMEOUT_MS = 8000;
