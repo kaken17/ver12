@@ -1537,31 +1537,60 @@ async function processSource(
 export default async function handler(req, res) {
   const startedAt = Date.now();
 
+  // ① APIにアクセスがあった時点で必ず記録
+  console.log("[CRAWL] handler started", {
+    method: req.method,
+    time: new Date().toISOString(),
+    hasCronSecret: Boolean(process.env.CRON_SECRET),
+    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+    hasSupabaseKey: Boolean(
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    )
+  });
+
+  // ② HTTPメソッド確認
   if (req.method !== "GET") {
+    console.error("[CRAWL] Invalid method:", req.method);
+
     return res.status(405).json({
       success: false,
       error: "Method Not Allowed"
     });
   }
 
-  // Cron認証
+  // ③ Cron認証
   const secret = process.env.CRON_SECRET;
+  const authorization = req.headers.authorization;
 
-  if (
-    !secret ||
-    req.headers.authorization !==
-      `Bearer ${secret}`
-  ) {
+  if (!secret) {
+    console.error("[CRAWL] CRON_SECRET is missing");
+
+    return res.status(500).json({
+      success: false,
+      error: "CRON_SECRET is not configured"
+    });
+  }
+
+  if (authorization !== `Bearer ${secret}`) {
+    console.error("[CRAWL] Authorization failed", {
+      hasAuthorization: Boolean(authorization)
+    });
+
     return res.status(401).json({
       success: false,
       error: "Unauthorized"
     });
   }
 
+  console.log("[CRAWL] Authorization successful");
+
   try {
+    // ④ Supabase接続
+    console.log("[CRAWL] Connecting to Supabase");
+
     const db = getSupabase();
 
-    // 最終巡回が古い情報源を優先
+    // ⑤ 有効な情報源を取得
     const { data: sources, error } = await db
       .from("sources")
       .select("*")
@@ -1575,45 +1604,66 @@ export default async function handler(req, res) {
       });
 
     if (error) {
+      console.error("[CRAWL] Source query failed:", error);
+
       throw error;
     }
 
-const results = [];
-const deferred = [];
-
-let processed = 0;
-
-for (const source of sources || []) {
-  if (
-    processed >= MAX_SOURCES_PER_RUN ||
-    Date.now() - startedAt >= MAX_RUN_MS
-  ) {
-    deferred.push(source.name);
-    continue;
-  }
-
-  processed++;
-
-  try {
-    const result = await processSource(
-      db,
-      source,
-      startedAt
-    );
-
-    results.push(result);
-
-  } catch (error) {
-    results.push({
-      source: source.name,
-      status: "failed",
-      error: String(
-        error.message || error
-      ).slice(0, 300)
+    console.log("[CRAWL] Sources loaded", {
+      count: sources?.length || 0,
+      names: (sources || []).map(source => source.name)
     });
-  }
-}
 
+    // ⑥ 情報源を巡回
+    const results = [];
+    const deferred = [];
+
+    let processed = 0;
+
+    for (const source of sources || []) {
+      if (
+        processed >= MAX_SOURCES_PER_RUN ||
+        Date.now() - startedAt >= MAX_RUN_MS
+      ) {
+        deferred.push(source.name);
+        continue;
+      }
+
+      processed++;
+
+      console.log("[CRAWL] Processing source", {
+        name: source.name,
+        id: source.id
+      });
+
+      try {
+        const result = await processSource(
+          db,
+          source,
+          startedAt
+        );
+
+        results.push(result);
+
+        console.log("[CRAWL] Source finished", result);
+
+      } catch (error) {
+        console.error("[CRAWL] Source failed", {
+          name: source.name,
+          message: error?.message
+        });
+
+        results.push({
+          source: source.name,
+          status: "failed",
+          error: String(
+            error?.message || error
+          ).slice(0, 300)
+        });
+      }
+    }
+
+    // ⑦ 集計
     const totals = results.reduce(
       (total, result) => {
         total.found += result.found || 0;
@@ -1633,32 +1683,37 @@ for (const source of sources || []) {
       }
     );
 
+    const elapsedMs = Date.now() - startedAt;
+
+    console.log("[CRAWL] Completed", {
+      sourceCount: sources?.length || 0,
+      processedCount: results.length,
+      deferredSources: deferred,
+      totals,
+      elapsedMs
+    });
+
+    // ⑧ 正常終了
     return res.status(200).json({
       success: true,
-
       source_count: sources?.length || 0,
-
       processed_count: results.length,
-
       deferred_sources: deferred,
-
-      elapsed_ms: Date.now() - startedAt,
-
+      elapsed_ms: elapsedMs,
       totals,
-
       results
     });
 
   } catch (error) {
-    console.error(
-      "Crawler error:",
-      error
-    );
+    console.error("[CRAWL] Fatal error", {
+      message: error?.message,
+      stack: error?.stack
+    });
 
     return res.status(500).json({
       success: false,
       error: String(
-        error.message || error
+        error?.message || error
       ).slice(0, 300)
     });
   }
