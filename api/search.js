@@ -22,7 +22,7 @@ function getSupabase() {
 }
 
 // =====================================
-// 質問カテゴリー
+// カテゴリーキーワード
 // =====================================
 
 const CATEGORY_KEYWORDS = {
@@ -32,7 +32,7 @@ const CATEGORY_KEYWORDS = {
     "電気科", "情報技術", "土木科",
     "工業化学", "学習内容", "専門科目",
     "実習内容", "何を学ぶ", "何を勉強",
-    "特徴", "違い", "比較"
+    "比較", "違い"
   ],
 
   部活動: [
@@ -71,24 +71,14 @@ const CATEGORY_KEYWORDS = {
     "修学旅行", "イベント"
   ],
 
-  
-アクセス: [
-  "アクセス",
-  "本校へのアクセス",
-  "交通アクセス",
-  "所在地",
-  "住所",
-  "地図",
-  "交通",
-  "最寄り駅",
-  "最寄りバス停",
-  "羽犬塚駅",
-  "羽犬塚",
-  "駐車場",
-  "公共交通機関",
-  "自動車"
-],
-
+  アクセス: [
+    "アクセス", "本校へのアクセス",
+    "交通アクセス", "所在地", "住所",
+    "地図", "交通", "最寄り駅",
+    "最寄りバス停", "羽犬塚駅",
+    "羽犬塚", "駐車場",
+    "公共交通機関"
+  ],
 
   学校概要: [
     "学校概要", "学校紹介", "特徴",
@@ -110,6 +100,19 @@ function normalize(text = "") {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// =====================================
+// 学科名
+// =====================================
+
+const DEPARTMENTS = [
+  "電子機械科",
+  "IT自動車科",
+  "電気科",
+  "情報技術科",
+  "土木科",
+  "工業化学科"
+];
 
 // =====================================
 // 質問分類
@@ -142,11 +145,12 @@ export function classifyQuestion(question) {
     }
   }
 
-  return "学校概要";
+  // 不明な質問を学校概要に強制分類しない
+  return "その他";
 }
 
 // =====================================
-// 質問の意図を判定
+// 質問意図
 // =====================================
 
 function detectIntent(question) {
@@ -157,7 +161,9 @@ function detectIntent(question) {
       /6学科|全学科|各学科|学科.*比較|学科.*特徴|学科.*違い|どの学科/.test(q),
 
     departmentDetail:
-      /電子機械科|it自動車科|自動車科|電気科|情報技術科|土木科|工業化学科/.test(q),
+      DEPARTMENTS.some(name =>
+        q.includes(normalize(name))
+      ),
 
     clubList:
       /部活動一覧|部活一覧|部活動.*教えて|部活.*教えて|どんな部活|何部/.test(q),
@@ -174,20 +180,7 @@ function detectIntent(question) {
 }
 
 // =====================================
-// 学科名
-// =====================================
-
-const DEPARTMENTS = [
-  "電子機械科",
-  "it自動車科",
-  "電気科",
-  "情報技術科",
-  "土木科",
-  "工業化学科"
-];
-
-// =====================================
-// 不要な表現を除去
+// 不要表現
 // =====================================
 
 const STOP_PHRASES = [
@@ -225,26 +218,13 @@ function cleanQuestion(question) {
   );
 
   for (const phrase of phrases) {
-    q = q.replaceAll(normalize(phrase), " ");
+    q = q.replaceAll(
+      normalize(phrase),
+      " "
+    );
   }
 
   return q.replace(/\s+/g, " ").trim();
-}
-
-// =====================================
-// 検索用資料の準備
-// =====================================
-
-function prepareDocuments(documents) {
-  return documents.map(doc => ({
-    ...doc,
-    normalizedTitle: normalize(doc.title),
-    normalizedCategory: normalize(doc.category),
-    normalizedContent: normalize(doc.content),
-    combined: normalize(
-      `${doc.title} ${doc.category} ${doc.content}`
-    )
-  }));
 }
 
 // =====================================
@@ -257,17 +237,35 @@ function makeQueryProfile(question) {
   const category = classifyQuestion(question);
   const intent = detectIntent(question);
 
-  const keywords = CATEGORY_KEYWORDS[category] || [];
+  const matchedKeywords = [];
 
-  const matchedKeywords = keywords.filter(word =>
-    normalized.includes(normalize(word))
+  for (const [name, words] of Object.entries(
+    CATEGORY_KEYWORDS
+  )) {
+    for (const word of words) {
+      if (normalized.includes(normalize(word))) {
+        matchedKeywords.push({
+          category: name,
+          word: normalize(word)
+        });
+      }
+    }
+  }
+
+  const departmentNames = DEPARTMENTS.filter(
+    name =>
+      normalized.includes(normalize(name))
   );
 
+  // 意味のある検索語を作成
   const grams = new Set();
 
-  // 2〜3文字の検索語
   for (const size of [2, 3]) {
-    for (let i = 0; i <= cleaned.length - size; i++) {
+    for (
+      let i = 0;
+      i <= cleaned.length - size;
+      i++
+    ) {
       const gram = cleaned.slice(i, i + size);
 
       if (
@@ -278,14 +276,9 @@ function makeQueryProfile(question) {
     }
   }
 
-  for (const word of matchedKeywords) {
-    grams.add(normalize(word));
+  for (const item of matchedKeywords) {
+    grams.add(item.word);
   }
-
-  // 質問に含まれる学科名を取得
-  const departmentNames = DEPARTMENTS.filter(name =>
-    normalized.includes(normalize(name))
-  );
 
   return {
     normalized,
@@ -293,8 +286,72 @@ function makeQueryProfile(question) {
     category,
     intent,
     grams: [...grams],
-    departmentNames
+    departmentNames,
+    matchedKeywords
   };
+}
+
+// =====================================
+// 検索可能な質問か判定
+// =====================================
+
+function isMeaningfulQuestion(profile) {
+  const {
+    cleaned,
+    category,
+    departmentNames,
+    matchedKeywords
+  } = profile;
+
+  // 1文字などの曖昧な質問を除外
+  if (cleaned.length < 2) {
+    return false;
+  }
+
+  // カテゴリーが不明で、検索語も短い場合
+  if (
+    category === "その他" &&
+    cleaned.length < 3
+  ) {
+    return false;
+  }
+
+  // カテゴリーも学科名もない短い質問
+  if (
+    category === "その他" &&
+    departmentNames.length === 0 &&
+    matchedKeywords.length === 0
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+// =====================================
+// 資料準備
+// =====================================
+
+function prepareDocuments(documents) {
+  return documents.map(doc => ({
+    ...doc,
+
+    normalizedTitle: normalize(
+      doc.title
+    ),
+
+    normalizedCategory: normalize(
+      doc.category
+    ),
+
+    normalizedContent: normalize(
+      doc.content
+    ),
+
+    combined: normalize(
+      `${doc.title} ${doc.category} ${doc.content}`
+    )
+  }));
 }
 
 // =====================================
@@ -322,7 +379,7 @@ function countOccurrences(text, term) {
 }
 
 // =====================================
-// 資料の関連度を計算
+// 資料の関連度計算
 // =====================================
 
 function scoreDocument(doc, profile) {
@@ -331,30 +388,34 @@ function scoreDocument(doc, profile) {
   const title = doc.normalizedTitle;
   const category = doc.normalizedCategory;
   const content = doc.normalizedContent;
+  const combined = doc.combined;
 
   const intent = profile.intent;
 
   // -----------------------------------
-  // ① カテゴリー一致を最優先
+  // ① カテゴリー一致
   // -----------------------------------
 
-  if (category === normalize(profile.category)) {
-    score += 100;
+  if (
+    profile.category !== "その他" &&
+    category === normalize(profile.category)
+  ) {
+    score += 25;
   }
 
   // -----------------------------------
-  // ② タイトル一致
+  // ② タイトル・本文一致
   // -----------------------------------
 
   for (const term of profile.grams) {
     if (term.length < 2) continue;
 
     if (title.includes(term)) {
-      score += 12;
+      score += 10;
     }
 
     if (category.includes(term)) {
-      score += 8;
+      score += 5;
     }
 
     const occurrences = countOccurrences(
@@ -362,7 +423,10 @@ function scoreDocument(doc, profile) {
       term
     );
 
-    score += Math.min(occurrences, 3) * 2;
+    score += Math.min(
+      occurrences,
+      3
+    ) * 2;
   }
 
   // -----------------------------------
@@ -373,7 +437,14 @@ function scoreDocument(doc, profile) {
     profile.cleaned.length >= 3 &&
     title.includes(profile.cleaned)
   ) {
-    score += 40;
+    score += 35;
+  }
+
+  if (
+    profile.cleaned.length >= 3 &&
+    combined.includes(profile.cleaned)
+  ) {
+    score += 15;
   }
 
   // -----------------------------------
@@ -382,19 +453,11 @@ function scoreDocument(doc, profile) {
 
   if (intent.departmentComparison) {
     if (category === "学科") {
-      score += 200;
+      score += 100;
     }
 
     if (title.includes("学科紹介")) {
-      score += 30;
-    }
-
-    if (
-      DEPARTMENTS.some(name =>
-        title.includes(normalize(name))
-      )
-    ) {
-      score += 20;
+      score += 40;
     }
   }
 
@@ -408,10 +471,8 @@ function scoreDocument(doc, profile) {
 
       if (title.includes(normalizedName)) {
         score += 150;
-      }
-
-      if (content.includes(normalizedName)) {
-        score += 40;
+      } else if (combined.includes(normalizedName)) {
+        score += 35;
       }
     }
   }
@@ -422,7 +483,7 @@ function scoreDocument(doc, profile) {
 
   if (profile.category === "部活動") {
     if (category === "部活動") {
-      score += 200;
+      score += 100;
     }
 
     if (
@@ -434,27 +495,70 @@ function scoreDocument(doc, profile) {
   }
 
   // -----------------------------------
-  // ⑦ 資格・進路・入試
+  // ⑦ 資格
   // -----------------------------------
 
-  if (intent.qualification && category === "資格") {
-    score += 100;
-  }
-
-  if (intent.career && category === "進路") {
-    score += 100;
-  }
-
-  if (intent.entrance && category === "入試") {
-    score += 100;
+  if (
+    intent.qualification &&
+    category === "資格"
+  ) {
+    score += 70;
   }
 
   // -----------------------------------
-  // ⑧ 年度の新しさ
+  // ⑧ 進路
+  // -----------------------------------
+
+  if (
+    intent.career &&
+    category === "進路"
+  ) {
+    score += 70;
+  }
+
+  // -----------------------------------
+  // ⑨ 入試
+  // -----------------------------------
+
+  if (
+    intent.entrance &&
+    category === "入試"
+  ) {
+    score += 70;
+  }
+
+  // -----------------------------------
+  // ⑩ アクセス
+  // -----------------------------------
+
+  if (profile.category === "アクセス") {
+    if (category === "アクセス") {
+      score += 70;
+    }
+
+    if (/所在地|アクセス|交通/.test(title)) {
+      score += 30;
+    }
+  }
+
+  // -----------------------------------
+  // ⑪ 学校概要
+  // -----------------------------------
+
+  if (profile.category === "学校概要") {
+    if (category === "学校概要") {
+      score += 50;
+    }
+  }
+
+  // -----------------------------------
+  // ⑫ 新しい資料を優先
   // -----------------------------------
 
   const date = Date.parse(
-    doc.source_date || doc.fetched_at || ""
+    doc.source_date ||
+    doc.fetched_at ||
+    ""
   );
 
   if (Number.isFinite(date)) {
@@ -462,21 +566,59 @@ function scoreDocument(doc, profile) {
       (Date.now() - date) / 86400000;
 
     if (ageDays >= 0 && ageDays <= 365) {
-      score += 15;
-    } else if (ageDays > 365 && ageDays <= 730) {
-      score += 7;
+      score += 8;
+    } else if (
+      ageDays > 365 &&
+      ageDays <= 730
+    ) {
+      score += 3;
     }
   }
 
   // -----------------------------------
-  // ⑨ 空資料・短すぎる資料を抑制
+  // ⑬ 空資料を除外
   // -----------------------------------
 
   if (!content || content.length < 30) {
-    score -= 30;
+    score -= 50;
   }
 
   return score;
+}
+
+// =====================================
+// 学科比較用の選択
+// =====================================
+
+function selectDepartmentDocuments(ranked) {
+  const selected = [];
+  const used = new Set();
+
+  // 6学科それぞれの資料を優先
+  for (const department of DEPARTMENTS) {
+    const name = normalize(department);
+
+    const found = ranked.find(item =>
+      item.doc.normalizedTitle.includes(name)
+    );
+
+    if (found && !used.has(found.doc.url)) {
+      selected.push(found);
+      used.add(found.doc.url);
+    }
+  }
+
+  // 残りの関連資料を追加
+  for (const item of ranked) {
+    if (selected.length >= 8) break;
+
+    if (!used.has(item.doc.url)) {
+      selected.push(item);
+      used.add(item.doc.url);
+    }
+  }
+
+  return selected.slice(0, 8);
 }
 
 // =====================================
@@ -491,6 +633,31 @@ export async function searchSchoolData(question) {
     return [];
   }
 
+  // -----------------------------------
+  // ① 質問分析
+  // -----------------------------------
+
+  const profile = makeQueryProfile(question);
+
+  console.log("検索プロフィール:", {
+    category: profile.category,
+    intent: profile.intent,
+    departmentNames: profile.departmentNames,
+    cleanedQuestion: profile.cleaned
+  });
+
+  // -----------------------------------
+  // ② 意味のない質問を除外
+  // -----------------------------------
+
+  if (!isMeaningfulQuestion(profile)) {
+    console.log(
+      "検索をスキップ: 質問の情報量が不足しています"
+    );
+
+    return [];
+  }
+
   const supabase = getSupabase();
 
   const PAGE_SIZE = 500;
@@ -500,7 +667,7 @@ export async function searchSchoolData(question) {
   let offset = 0;
 
   // -----------------------------------
-  // Supabaseから資料取得
+  // ③ Supabaseから資料取得
   // -----------------------------------
 
   while (offset < MAX_DOCUMENTS) {
@@ -542,112 +709,110 @@ export async function searchSchoolData(question) {
     offset += PAGE_SIZE;
   }
 
-  if (!Array.isArray(data) || data.length === 0) {
-    console.log("学校資料が登録されていません");
+  if (data.length === 0) {
+    console.log(
+      "学校資料が登録されていません"
+    );
+
     return [];
   }
 
   // -----------------------------------
-  // 空資料を除外
+  // ④ 空資料除外
   // -----------------------------------
 
   const documents = prepareDocuments(
     data.filter(doc =>
       typeof doc.content === "string" &&
-      doc.content.trim().length > 0
+      doc.content.trim().length >= 30
     )
   );
 
   // -----------------------------------
-  // 質問分析
+  // ⑤ 関連度計算
   // -----------------------------------
-
-  const profile = makeQueryProfile(question);
-
- 
-  console.log("検索プロフィール:", {
-    category: profile.category,
-    intent: profile.intent,
-    departmentNames: profile.departmentNames,
-    documentCount: documents.length
-  });
-
-  // ===================================
-  // 関連度計算
-  // ===================================
 
   const ranked = documents
     .map(doc => ({
       doc,
-      score: scoreDocument(doc, profile)
+      score: scoreDocument(
+        doc,
+        profile
+      )
     }))
-    .filter(item => item.score >= 10)
+    .filter(item =>
+      item.score >= 20
+    )
     .sort((a, b) => {
       if (b.score !== a.score) {
         return b.score - a.score;
       }
 
       const dateA = Date.parse(
-        a.doc.source_date || a.doc.fetched_at || ""
+        a.doc.source_date ||
+        a.doc.fetched_at ||
+        ""
       ) || 0;
 
       const dateB = Date.parse(
-        b.doc.source_date || b.doc.fetched_at || ""
+        b.doc.source_date ||
+        b.doc.fetched_at ||
+        ""
       ) || 0;
 
       return dateB - dateA;
     });
 
-  // ===================================
-  // 学科比較の場合
-  // ===================================
+  // -----------------------------------
+  // ⑥ 検索結果の選択
+  // -----------------------------------
 
   let results;
 
   if (profile.intent.departmentComparison) {
-    const departmentDocs = ranked.filter(
-      item =>
-        item.doc.normalizedCategory === "学科"
-    );
-
-    const otherDocs = ranked.filter(
-      item =>
-        item.doc.normalizedCategory !== "学科"
-    );
-
-    results = [
-      ...departmentDocs,
-      ...otherDocs
-    ].slice(0, 8);
+    results = selectDepartmentDocuments(ranked);
 
   } else {
     results = ranked.slice(0, 8);
   }
 
-  // ===================================
-  // 検索ログ
-  // ===================================
+  // -----------------------------------
+  // ⑦ ログ
+  // -----------------------------------
 
   console.log("学校資料検索結果:", {
     question: question.slice(0, 100),
+
     category: profile.category,
+
     totalDocuments: documents.length,
+
     matchedDocuments: ranked.length,
+
     selectedDocuments: results.length,
+
     selectedTitles: results.map(
       item => item.doc.title
+    ),
+
+    selectedScores: results.map(
+      item => item.score
     )
   });
 
-  // ===================================
-  // 検索結果を返す
-  // ===================================
+  // -----------------------------------
+  // ⑧ 結果返却
+  // -----------------------------------
 
   return results.map(({ doc }) => ({
     title: doc.title || "タイトル不明",
+
     category: doc.category || "学校情報",
+
     content: doc.content,
+
     source: doc.url || "",
+
     source_date: doc.source_date || null
   }));
 }
