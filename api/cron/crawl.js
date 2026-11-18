@@ -244,22 +244,19 @@ async function getHTML(url, source, deadline) {
 // =============================================
 
 function robotsPatternMatches(pattern, pathname) {
-  let escaped = pattern.replace(
-    /[.+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
-
-  escaped = escaped.replace(/\*/g, ".*");
-
-  if (escaped.endsWith("\\$")) {
-    escaped = escaped.slice(0, -2) + "$";
-  } else {
-    escaped += ".*";
-  }
+   let response;
 
   try {
-    return new RegExp("^" + escaped).test(pathname);
-    } catch (error) {
+    response = await fetch(url.href, {
+      headers: {
+        "User-Agent": USER_AGENT
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(
+        Math.min(REQUEST_TIMEOUT_MS, remaining)
+      )
+    });
+  } catch (error) {
     console.error("[ROBOTS] Fetch failed:", {
       source: source.name,
       url: url.href,
