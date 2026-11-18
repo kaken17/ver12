@@ -1,11 +1,13 @@
-
 import { createClient } from "@supabase/supabase-js";
 import * as cheerio from "cheerio";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import crypto from "node:crypto";
+
+// 八女工業高等学校 公式サイト
+const ROOT = "https://yameth.fku.ed.jp/";
+const HOST = new URL(ROOT).hostname;
 
 // =============================================
 // 八女工業高校 情報収集エンジン
