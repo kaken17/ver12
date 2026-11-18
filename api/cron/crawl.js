@@ -31,22 +31,14 @@ const USER_AGENT =
   "YameSchoolGuideBot/1.0";
 
 const MAX_RUN_MS = 8500;
-const SOURCE_BUDGET_MS = 2500;
+const SOURCE_BUDGET_MS = 6000;
 
 const REQUEST_TIMEOUT_MS = 1800;
 
 const MAX_PAGES_PER_SOURCE = 6;
 const MAX_PDF_PAGES = 8;
 
-const MAX_HTML_SIZE = 2 * 1024 * 1024;
-const MAX_PDF_SIZE = 10 * 1024 * 1024;
-
-const MAX_CONTENT_LENGTH = 12000;
-
-const MIN_CONTENT_LENGTH = 40;
-
-const MAX_FEED_ENTRIES = 10;
-
+// 1回の実行で確認する子サイトマップ数
 const MAX_SITEMAPS = 3;
 
 const MAX_SOURCES_PER_RUN = 2;
@@ -876,7 +868,7 @@ async function collectSitemapURLs(
 }
 
 // =============================================
-// URL収集
+// URL収集（サイトマップ優先）
 // =============================================
 
 async function collectURLs(
@@ -885,61 +877,19 @@ async function collectURLs(
   deadline
 ) {
   const found = new Set();
-
   const feeds = new Set();
 
   const baseURL = new URL(
     source.base_url
   ).href;
 
-  // トップページからRSSとリンクを取得
+  // ① 最初にサイトマップからURLを収集
   try {
-    if (allowed(baseURL)) {
-      const html = await getHTML(
-        baseURL,
-        source,
-        deadline
-      );
+    console.log("[CRAWL] Sitemap collection started", {
+      source: source.name,
+      remaining_ms: remainingTime(deadline)
+    });
 
-      const $ = cheerio.load(html);
-
-      for (const feed of discoverFeeds(
-        html,
-        source,
-        allowed
-      )) {
-        feeds.add(feed);
-      }
-
-      $("a[href]").each((_, element) => {
-        try {
-          const url = validateURL(
-            $(element).attr("href"),
-            source
-          ).href;
-
-          if (
-            !isExcludedFile(url) &&
-            allowed(url)
-          ) {
-            found.add(url);
-          }
-        } catch {
-          // 無効URLを除外
-        }
-      });
-
-    }
-
-  } catch (error) {
-    console.error(
-      "トップページ取得:",
-      error.message
-    );
-  }
-
-  // サイトマップも調査
-  if (remainingTime(deadline) > 1000) {
     const sitemapURLs = await collectSitemapURLs(
       source,
       allowed,
@@ -949,25 +899,92 @@ async function collectURLs(
     for (const url of sitemapURLs) {
       found.add(url);
     }
+
+    console.log("[CRAWL] Sitemap collection finished", {
+      source: source.name,
+      url_count: found.size,
+      remaining_ms: remainingTime(deadline)
+    });
+
+  } catch (error) {
+    console.error(
+      "[CRAWL] Sitemap collection error:",
+      error.message
+    );
   }
 
-  // トップページを追加
+  // ② 時間に余裕がある場合だけトップページを調査
+  if (remainingTime(deadline) > 1800) {
+    try {
+      if (allowed(baseURL)) {
+        const html = await getHTML(
+          baseURL,
+          source,
+          deadline
+        );
+
+        const $ = cheerio.load(html);
+
+        for (const feed of discoverFeeds(
+          html,
+          source,
+          allowed
+        )) {
+          feeds.add(feed);
+        }
+
+        $("a[href]").each((_, element) => {
+          try {
+            const url = validateURL(
+              $(element).attr("href"),
+              source
+            ).href;
+
+            if (
+              !isExcludedFile(url) &&
+              allowed(url)
+            ) {
+              found.add(url);
+            }
+          } catch {
+            // 無効URLを除外
+          }
+        });
+      }
+
+    } catch (error) {
+      console.error(
+        "[CRAWL] Homepage collection error:",
+        error.message
+      );
+    }
+  }
+
+  // ③ トップページも候補に加える
   if (allowed(baseURL)) {
     found.add(baseURL);
   }
 
+  const urls = [...found].slice(
+    0,
+    Math.min(
+      Number(source.max_pages) || 4,
+      MAX_PAGES_PER_SOURCE
+    )
+  );
+
+  console.log("[CRAWL] URL collection completed", {
+    source: source.name,
+    collected_count: found.size,
+    selected_count: urls.length,
+    remaining_ms: remainingTime(deadline)
+  });
+
   return {
-    urls: [...found].slice(
-      0,
-      Math.min(
-        Number(source.max_pages) || 4,
-        MAX_PAGES_PER_SOURCE
-      )
-    ),
+    urls,
     feeds: [...feeds]
   };
 }
-
 // =============================================
 // カテゴリー分類
 // =============================================
@@ -1595,13 +1612,13 @@ export default async function handler(req, res) {
       .from("sources")
       .select("*")
       .eq("enabled", true)
-      .order("last_crawled_at", {
-        ascending: true,
-        nullsFirst: true
-      })
-      .order("priority", {
-        ascending: false
-      });
+     .order("priority", {
+  ascending: false
+})
+.order("last_crawled_at", {
+  ascending: true,
+  nullsFirst: true
+});
 
     if (error) {
       console.error("[CRAWL] Source query failed:", error);
