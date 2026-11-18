@@ -1,8 +1,6 @@
 
 import { extractOfficialPdf } from "./pdfExtractor.js";
-import {
-  organizeSchoolDocuments
-} from "./schoolOrganizer.js";
+import { organizeSchoolDocuments } from "./schoolOrganizer.js";
 
 const SCHOOL_URL = "https://yameth.fku.ed.jp/";
 const SCHOOL_HOST = "yameth.fku.ed.jp";
@@ -56,6 +54,128 @@ const CATEGORY_TERMS = {
   ]
 };
 
+const CATEGORY_PATTERNS = {
+  学科: /学科|各科紹介|電子機械|電気科|土木科|工業化学|情報技術|IT自動車/,
+  部活動: /部活動|クラブ|部紹介|ラグビー|野球|陸上|弓道/,
+  資格: /資格|検定|電気工事士|ジュニアマイスター/,
+  進路: /進路|就職|進学|大学|企業/,
+  入試: /入試|募集要項|選抜|受験/,
+  学費: /学費|授業料|入学金|納入金/,
+  学校行事: /行事|文化祭|体育祭|修学旅行/,
+  アクセス: /アクセス|交通|所在地|地図|住所/,
+  学校概要: /学校紹介|学校概要|教育方針|沿革/
+};
+
+// =====================================
+// 検索語の正規化
+// =====================================
+
+function normalizeQuestion(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s、。？！?・!！,，.．「」『』（）()【】\[\]{}]/g, "")
+    .trim();
+}
+
+// =====================================
+// 検索語の妥当性確認
+// =====================================
+
+function isMeaningfulQuestion(question) {
+  const normalized = normalizeQuestion(question);
+
+  if (!normalized) return false;
+
+  // 1文字だけの検索語は除外
+  if (normalized.length < 2) return false;
+
+  // 意味のない入力や一般的な相づちを除外
+  const invalidWords = [
+    "あ",
+    "ああ",
+    "え",
+    "ええ",
+    "うん",
+    "はい",
+    "いいえ",
+    "テスト",
+    "test",
+    "aaa",
+    "123",
+    "検索",
+    "教えて",
+    "こんにちは",
+    "よろしく"
+  ];
+
+  if (invalidWords.includes(normalized)) {
+    return false;
+  }
+
+  // 同じ文字の連続だけの入力を除外
+  if (/^(.)\1+$/.test(normalized)) {
+    return false;
+  }
+
+  return true;
+}
+
+// =====================================
+// 検索語からキーワードを抽出
+// =====================================
+
+function getQuestionTerms(question, category) {
+  const normalized = normalizeQuestion(question);
+
+  if (!normalized) return [];
+
+  const terms = new Set();
+
+  // 空白などで分割できる検索語を取得
+  const splitTerms = String(question || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[\s、。？！?・!！,，]+/)
+    .filter(term => term.length >= 2);
+
+  for (const term of splitTerms) {
+    terms.add(term);
+  }
+
+  // カテゴリーのキーワードのうち、
+  // 実際に質問に含まれているものだけ追加
+  const categoryTerms = CATEGORY_TERMS[category] || [];
+
+  for (const term of categoryTerms) {
+    const normalizedTerm = normalizeQuestion(term);
+
+    if (
+      normalizedTerm.length >= 2 &&
+      normalized.includes(normalizedTerm)
+    ) {
+      terms.add(normalizedTerm);
+    }
+  }
+
+  // 日本語の複合語にも対応
+  // 例：電気科について → 電気科
+  const allTerms = Object.values(CATEGORY_TERMS).flat();
+
+  for (const term of allTerms) {
+    const normalizedTerm = normalizeQuestion(term);
+
+    if (
+      normalizedTerm.length >= 2 &&
+      normalized.includes(normalizedTerm)
+    ) {
+      terms.add(normalizedTerm);
+    }
+  }
+
+  return [...terms];
+}
+
 // =====================================
 // URLの安全確認
 // =====================================
@@ -86,7 +206,7 @@ function normalizeUrl(value, base = SCHOOL_URL) {
 // =====================================
 
 function decodeHtml(text) {
-  return text
+  return String(text || "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
@@ -97,7 +217,7 @@ function decodeHtml(text) {
 
 function htmlToText(html) {
   return decodeHtml(
-    html
+    String(html || "")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
@@ -154,65 +274,113 @@ function extractLinks(html, baseUrl) {
 }
 
 // =====================================
-// 関連度判定 rankLinks
+// 関連度判定
 // =====================================
 
 function rankLinks(links, question, category) {
-  const questionTerms = String(question || "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .split(/[\s、。？！?・]+/)
-    .filter(word => word.length >= 2);
+  if (!isMeaningfulQuestion(question)) {
+    return [];
+  }
 
-  const categoryTerms =
-    CATEGORY_TERMS[category] || [];
+  const questionTerms = getQuestionTerms(question, category);
 
-  const terms = [
-    ...new Set([...categoryTerms, ...questionTerms])
-  ];
+  if (questionTerms.length === 0) {
+    return [];
+  }
 
-  const patterns = {
-    学科: /学科|各科紹介/,
-    部活動: /部活動|クラブ|部紹介/,
-    資格: /資格|検定/,
-    進路: /進路|就職|進学/,
-    入試: /入試|募集要項|選抜/,
-    学費: /学費|授業料|納入金/,
-    学校行事: /行事|文化祭|体育祭/,
-    アクセス: /アクセス|交通|所在地|地図/,
-    学校概要: /学校紹介|学校概要|教育方針|沿革/
-  };
+  const normalizedQuestion = normalizeQuestion(question);
+
+  const categoryTerms = CATEGORY_TERMS[category] || [];
+
+  // 質問にカテゴリー関連語が含まれる場合のみ
+  // カテゴリー判定を有効にする
+  const hasCategorySignal = categoryTerms.some(term =>
+    normalizedQuestion.includes(normalizeQuestion(term))
+  );
 
   return links
     .map(link => {
-      const title = String(link.title || "")
-        .normalize("NFKC")
-        .toLowerCase();
-
-      const url = String(link.url || "")
-        .toLowerCase();
+      const title = normalizeQuestion(link.title);
+      const url = normalizeQuestion(link.url);
 
       let score = 0;
 
-      for (const term of terms) {
-        const keyword = term.toLowerCase();
+      for (const term of questionTerms) {
+        const keyword = normalizeQuestion(term);
 
-        if (title.includes(keyword)) score += 15;
-        if (url.includes(keyword)) score += 5;
+        if (!keyword) continue;
+
+        if (title.includes(keyword)) {
+          score += keyword.length >= 4 ? 30 : 20;
+        }
+
+        if (url.includes(keyword)) {
+          score += 10;
+        }
       }
 
-      if (patterns[category]?.test(title)) {
-        score += 40;
+      // 質問自体にカテゴリーの手がかりがある場合のみ加点
+      if (
+        hasCategorySignal &&
+        CATEGORY_PATTERNS[category]?.test(link.title || "")
+      ) {
+        score += 15;
       }
 
-      if (/八工news|ニュース/i.test(title)) {
-        score += 5;
+      if (/八工news|ニュース/i.test(link.title || "")) {
+        score += 3;
       }
 
       return { ...link, score };
     })
     .filter(item => item.score >= 15)
     .sort((a, b) => b.score - a.score);
+}
+
+// =====================================
+// 本文の関連度判定
+// =====================================
+
+function scoreDocument(doc, question, category) {
+  const questionTerms = getQuestionTerms(question, category);
+
+  const title = normalizeQuestion(doc.title);
+  const content = normalizeQuestion(doc.content);
+  const source = normalizeQuestion(doc.source);
+
+  let score = 0;
+
+  for (const term of questionTerms) {
+    const keyword = normalizeQuestion(term);
+
+    if (!keyword) continue;
+
+    if (title.includes(keyword)) {
+      score += keyword.length >= 4 ? 30 : 20;
+    }
+
+    if (content.includes(keyword)) {
+      score += 8;
+    }
+
+    if (source.includes(keyword)) {
+      score += 5;
+    }
+  }
+
+  // カテゴリー名だけで無関係な資料を採用しない
+  if (
+    CATEGORY_PATTERNS[category]?.test(doc.title || "") &&
+    questionTerms.length > 0
+  ) {
+    score += 5;
+  }
+
+  if (doc.origin === "official_pdf") {
+    score += 3;
+  }
+
+  return score;
 }
 
 // =====================================
@@ -275,8 +443,31 @@ async function fetchPage(url) {
 
 export async function searchOfficialWebsite(
   question,
-  category = "学校概要"
+  category = "その他"
 ) {
+  // ① 検索語チェック
+  // 無効な質問なら公式サイトにアクセスしない
+  if (!isMeaningfulQuestion(question)) {
+    console.log("公式サイト検索をスキップ:", {
+      question,
+      reason: "検索語が短い、または無効"
+    });
+
+    return [];
+  }
+
+  const questionTerms = getQuestionTerms(question, category);
+
+  if (questionTerms.length === 0) {
+    console.log("公式サイト検索をスキップ:", {
+      question,
+      category,
+      reason: "検索キーワードを抽出できない"
+    });
+
+    return [];
+  }
+
   const visited = new Set();
 
   const queue = [{
@@ -288,13 +479,14 @@ export async function searchOfficialWebsite(
   const results = [];
   const pdfMap = new Map();
 
-  // ① HTML巡回
+  // ② HTML巡回
 
   while (
     queue.length > 0 &&
     visited.size < MAX_PAGES
   ) {
     const current = queue.shift();
+
     const safeUrl = normalizeUrl(current.url);
 
     if (!safeUrl || visited.has(safeUrl)) {
@@ -358,99 +550,97 @@ export async function searchOfficialWebsite(
     }
   }
 
-  // ② PDF解析
+  // ③ PDF解析
+  // 関連性の高いPDFだけを解析する
 
-  const pdfCandidates = [
-    ...pdfMap.values()
-  ].slice(0, MAX_PDFS);
+  const rankedPdfs = rankLinks(
+    [...pdfMap.values()],
+    question,
+    category
+  );
+
+  const pdfCandidates = rankedPdfs.slice(0, MAX_PDFS);
 
   for (const pdf of pdfCandidates) {
-    const extractedPdf =
-      await extractOfficialPdf(pdf.url);
+    try {
+      const extractedPdf =
+        await extractOfficialPdf(pdf.url);
 
-    if (!extractedPdf) continue;
+      if (
+        !extractedPdf ||
+        !extractedPdf.content ||
+        extractedPdf.content.trim().length < 50
+      ) {
+        continue;
+      }
 
-    results.push({
-      title: pdf.title,
-      category,
-      content: extractedPdf.content.slice(
-        0,
-        MAX_CONTENT_LENGTH
-      ),
-      source: extractedPdf.source,
-      source_date: null,
-      origin: "official_pdf",
-      depth: 1
-    });
+      results.push({
+        title: pdf.title,
+        category,
+        content: extractedPdf.content.slice(
+          0,
+          MAX_CONTENT_LENGTH
+        ),
+        source: extractedPdf.source || pdf.url,
+        source_date: null,
+        origin: "official_pdf",
+        depth: 1
+      });
+    } catch (error) {
+      console.error(
+        "公式PDF解析エラー:",
+        pdf.url,
+        error.message
+      );
+    }
   }
 
-  // ③ 本文も含めて関連度評価
+  // ④ 本文も含めて関連度評価
 
-  const rankedResults = results.map(doc => {
-    const ranked = rankLinks(
-      [{
-        title: doc.title,
-        url: doc.source
-      }],
-      question,
-      category
-    );
-
-    let score = ranked[0]?.score || 0;
-
-    const content = String(doc.content || "")
-      .normalize("NFKC")
-      .toLowerCase();
-
-    const terms = CATEGORY_TERMS[category] || [];
-
-    for (const term of terms) {
-      if (
-        content.includes(
-          term.normalize("NFKC").toLowerCase()
-        )
-      ) {
-        score += 5;
-      }
-    }
-
-    if (doc.origin === "official_pdf") {
-      score += 10;
-    }
-
-    return { doc, score };
-  });
-
-  // ④ 関連度順に整理
+  const rankedResults = results.map(doc => ({
+    doc,
+    score: scoreDocument(doc, question, category)
+  }));
 
   rankedResults.sort(
     (a, b) => b.score - a.score
   );
 
-  const finalResults = rankedResults
-  .filter(item =>
-    item.doc.content &&
-    item.doc.content.trim().length >= 50 &&
-    item.score >= 5
-  )
-  .slice(0, 8)
-  .map(item => item.doc);
+  // ⑤ 関連度の低い資料を除外
 
-  // ⑤ 学校資料の分類
+  const finalResults = rankedResults
+    .filter(item =>
+      item.doc.content &&
+      item.doc.content.trim().length >= 50 &&
+      item.score >= 15
+    )
+    .slice(0, 8)
+    .map(item => item.doc);
+
+  // ⑥ 学校資料の分類
 
   const organizedResults =
-    organizeSchoolDocuments(finalResults);
+    finalResults.length > 0
+      ? organizeSchoolDocuments(finalResults)
+      : [];
+
+  // ⑦ ログ
 
   console.log("公式サイト検索完了:", {
+    question,
     category,
+    questionTerms,
     visitedPages: visited.size,
     discoveredPdfs: pdfMap.size,
+    selectedPdfs: pdfCandidates.length,
     htmlResults: results.filter(
       item => item.origin === "official_website"
     ).length,
     pdfResults: results.filter(
       item => item.origin === "official_pdf"
     ).length,
+    rankedResults: rankedResults.length,
+    selectedResults: finalResults.length,
     totalResults: organizedResults.length
   });
 
