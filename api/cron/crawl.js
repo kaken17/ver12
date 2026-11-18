@@ -259,45 +259,17 @@ function robotsPatternMatches(pattern, pathname) {
 
   try {
     return new RegExp("^" + escaped).test(pathname);
-  } catch {
-    return false;
-  }
-}
-
-async function getRobotsRules(source, deadline) {
-  const robotsURL = new URL(
-    "/robots.txt",
-    source.base_url
-  ).href;
-
-  const url = validateURL(
-    robotsURL,
-    source
-  );
-
-  const remaining = remainingTime(deadline);
-
-  if (remaining < 300) {
-    throw new Error(
-      "robots.txt確認時間が不足しています"
-    );
-  }
-
-  let response;
-
-  try {
-    response = await fetch(url.href, {
-      headers: {
-        "User-Agent": USER_AGENT
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(
-        Math.min(REQUEST_TIMEOUT_MS, remaining)
-      )
+    } catch (error) {
+    console.error("[ROBOTS] Fetch failed:", {
+      source: source.name,
+      url: url.href,
+      error_name: error.name,
+      error_message: error.message,
+      remaining_ms: remainingTime(deadline)
     });
-  } catch {
+
     throw new Error(
-      "robots.txtを取得できません"
+      `robots.txt取得失敗: ${error.name}: ${error.message}`
     );
   }
 
