@@ -4,7 +4,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-
+import crypto from "node:crypto";
 // 八女工業高等学校 公式サイト
 const ROOT = "https://yameth.fku.ed.jp/";
 const HOST = new URL(ROOT).hostname;
@@ -41,6 +41,8 @@ const MIN_CONTENT_LENGTH = 40;
 const MAX_FEED_ENTRIES = 10;
 const MAX_SITEMAPS = 3;
 const MAX_SOURCES_PER_RUN = 2;
+
+const USER_AGENT = "YameSchoolGuideBot/1.0";
 // =============================================
 // Supabase
 // =============================================
@@ -243,8 +245,48 @@ async function getHTML(url, source, deadline) {
 // robots.txt
 // =============================================
 
+
+// =============================================
+// robots.txt
+// =============================================
+
 function robotsPatternMatches(pattern, pathname) {
-   let response;
+  let escaped = pattern.replace(
+    /[.+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+
+  escaped = escaped.replace(/\*/g, ".*");
+
+  if (escaped.endsWith("\\$")) {
+    escaped = escaped.slice(0, -2) + "$";
+  } else {
+    escaped += ".*";
+  }
+
+  try {
+    return new RegExp("^" + escaped).test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function getRobotsRules(source, deadline) {
+  const robotsURL = new URL(
+    "/robots.txt",
+    source.base_url
+  ).href;
+
+  const url = validateURL(robotsURL, source);
+  const remaining = remainingTime(deadline);
+
+  if (remaining < 300) {
+    throw new Error(
+      "robots.txt確認時間が不足しています"
+    );
+  }
+
+  let response;
 
   try {
     response = await fetch(url.href, {
@@ -270,16 +312,8 @@ function robotsPatternMatches(pattern, pathname) {
     );
   }
 
-  // robots.txtが存在しない場合
   if (response.status === 404) {
     return () => true;
-  }
-
-  // 403や5xxなどは安全側で停止
-  if (!response.ok) {
-    throw new Error(
-      `robots.txt HTTP ${response.status}`
-    );
   }
 
   if (
@@ -291,21 +325,23 @@ function robotsPatternMatches(pattern, pathname) {
     );
   }
 
+  if (!response.ok) {
+    throw new Error(
+      `robots.txt HTTP ${response.status}`
+    );
+  }
+
   const text = (
     await readLimited(response, 100 * 1024)
   ).toString("utf8");
 
   const groups = [];
-
   let agents = [];
   let rules = [];
 
   function saveGroup() {
     if (agents.length > 0) {
-      groups.push({
-        agents,
-        rules
-      });
+      groups.push({ agents, rules });
     }
   }
 
@@ -330,7 +366,6 @@ function robotsPatternMatches(pattern, pathname) {
     if (key === "user-agent") {
       if (rules.length > 0) {
         saveGroup();
-
         agents = [];
         rules = [];
       }
@@ -370,10 +405,7 @@ function robotsPatternMatches(pattern, pathname) {
 
     const matches = selectedRules
       .filter(rule =>
-        robotsPatternMatches(
-          rule.path,
-          pathname
-        )
+        robotsPatternMatches(rule.path, pathname)
       )
       .sort((a, b) => {
         if (b.path.length !== a.path.length) {
