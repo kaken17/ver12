@@ -26,21 +26,20 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 // =============================================
 // 基本設定
 // =============================================
-
-const USER_AGENT =
-  "YameSchoolGuideBot/1.0";
-
 const MAX_RUN_MS = 8500;
 const SOURCE_BUDGET_MS = 6000;
-
 const REQUEST_TIMEOUT_MS = 1800;
 
 const MAX_PAGES_PER_SOURCE = 6;
 const MAX_PDF_PAGES = 8;
 
-// 1回の実行で確認する子サイトマップ数
-const MAX_SITEMAPS = 3;
+const MAX_HTML_SIZE = 2 * 1024 * 1024;
+const MAX_PDF_SIZE = 10 * 1024 * 1024;
 
+const MAX_CONTENT_LENGTH = 12000;
+const MIN_CONTENT_LENGTH = 40;
+const MAX_FEED_ENTRIES = 10;
+const MAX_SITEMAPS = 3;
 const MAX_SOURCES_PER_RUN = 2;
 // =============================================
 // Supabase
