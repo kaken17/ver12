@@ -611,7 +611,7 @@ ${context}
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
             "HTTP-Referer": "https://yameth.fku.ed.jp/",
-            "X-Title": "八女工業高等学校 AI案内"
+            "X-Title": "Yame Technical High School AI"
           },
           body: JSON.stringify({
             model: FREE_MODEL,
