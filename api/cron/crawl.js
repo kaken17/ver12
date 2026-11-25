@@ -5,13 +5,13 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import crypto from "node:crypto";
+
 // 八女工業高等学校 公式サイト
 const ROOT = "https://yameth.fku.ed.jp/";
 const HOST = new URL(ROOT).hostname;
 
 // =============================================
 // 八女工業高校 情報収集エンジン
-// 完全統合版
 // =============================================
 
 const require = createRequire(import.meta.url);
@@ -26,9 +26,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 // =============================================
 // 基本設定
 // =============================================
+
 const MAX_RUN_MS = 8500;
 const SOURCE_BUDGET_MS = 3600;
-
 const REQUEST_TIMEOUT_MS = 2500;
 
 const MAX_PAGES_PER_SOURCE = 6;
@@ -38,16 +38,14 @@ const MAX_HTML_SIZE = 2 * 1024 * 1024;
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
 
 const MAX_CONTENT_LENGTH = 12000;
-
 const MIN_CONTENT_LENGTH = 40;
 
 const MAX_FEED_ENTRIES = 10;
-
 const MAX_SITEMAPS = 4;
-
 const MAX_SOURCES_PER_RUN = 2;
 
 const USER_AGENT = "YameSchoolGuideBot/1.0";
+
 // =============================================
 // Supabase
 // =============================================
@@ -132,7 +130,6 @@ async function safeFetch(
   timeout = REQUEST_TIMEOUT_MS
 ) {
   const url = validateURL(value, source);
-
   const remaining = remainingTime(deadline);
 
   if (remaining < 300) {
@@ -183,9 +180,7 @@ async function readLimited(response, maxSize) {
   }
 
   const reader = response.body.getReader();
-
   const chunks = [];
-
   let total = 0;
 
   try {
@@ -250,11 +245,6 @@ async function getHTML(url, source, deadline) {
 // robots.txt
 // =============================================
 
-
-// =============================================
-// robots.txt
-// =============================================
-
 function robotsPatternMatches(pattern, pathname) {
   let escaped = pattern.replace(
     /[.+?^${}()|[\]\\]/g,
@@ -286,7 +276,9 @@ async function getRobotsRules(source, deadline) {
   const remaining = remainingTime(deadline);
 
   if (remaining < 300) {
-    throw new Error("robots.txt確認時間が不足しています");
+    throw new Error(
+      "robots.txt確認時間が不足しています"
+    );
   }
 
   let response;
@@ -321,11 +313,15 @@ async function getRobotsRules(source, deadline) {
   }
 
   if (response.status >= 300 && response.status < 400) {
-    throw new Error("robots.txtのリダイレクトを拒否しました");
+    throw new Error(
+      "robots.txtのリダイレクトを拒否しました"
+    );
   }
 
   if (!response.ok) {
-    throw new Error(`robots.txt HTTP ${response.status}`);
+    throw new Error(
+      `robots.txt HTTP ${response.status}`
+    );
   }
 
   const text = (
@@ -372,7 +368,7 @@ async function getRobotsRules(source, deadline) {
         if (!sitemapURLs.includes(sitemapURL)) {
           sitemapURLs.push(sitemapURL);
         }
-      } catch (error) {
+      } catch {
         console.warn(
           "[ROBOTS] Invalid sitemap URL:",
           value
@@ -492,9 +488,7 @@ function cleanHTML(html, url, source) {
       .slice(0, MAX_CONTENT_LENGTH),
 
     category: source.category || "未分類",
-
     source_date: sourceDate,
-
     content_type: "html"
   };
 }
@@ -556,7 +550,6 @@ async function extractPDF(url, source, deadline) {
   });
 
   const document = await task.promise;
-
   const pages = [];
 
   try {
@@ -571,7 +564,6 @@ async function extractPDF(url, source, deadline) {
       }
 
       const page = await document.getPage(i);
-
       const text = await page.getTextContent();
 
       pages.push(
@@ -634,7 +626,6 @@ async function cleanPDF(url, source, deadline) {
     content_type: "pdf"
   };
 }
-
 // =============================================
 // RSS・Atom解析
 // =============================================
@@ -685,18 +676,12 @@ function parseFeed(xml, source) {
     }
 
     try {
-      const url = validateURL(
-        link,
-        source
-      ).href;
+      const url = validateURL(link, source).href;
 
       entries.push({
         url,
         title: title.slice(0, 300),
-        content: content.slice(
-          0,
-          MAX_CONTENT_LENGTH
-        ),
+        content: content.slice(0, MAX_CONTENT_LENGTH),
         category: source.category || "未分類",
         source_date: date || null,
         content_type: "feed"
@@ -716,7 +701,6 @@ function parseFeed(xml, source) {
 
 function discoverFeeds(html, source, allowed) {
   const $ = cheerio.load(html);
-
   const feeds = new Set();
 
   $('link[rel="alternate"][href]').each(
@@ -775,18 +759,13 @@ async function collectSitemapURLs(
 ) {
   const found = new Set();
   const visited = new Set();
-
   const base = new URL(source.base_url);
 
-  // robots.txtに記載されたURLを最優先
+  // robots.txt記載URLを優先し、一般的な候補も確認
   const sitemapCandidates = [
     ...(allowed.sitemaps || []),
-
-    // 一般的なサイトマップ
     new URL("/sitemap.xml", base).href,
     new URL("/sitemap_index.xml", base).href,
-
-    // WordPress標準サイトマップ
     new URL("/wp-sitemap.xml", base).href
   ];
 
@@ -851,7 +830,7 @@ async function collectSitemapURLs(
 
           const pathname = new URL(url).pathname;
 
-          // 子サイトマップなら次の取得候補へ
+          // 子サイトマップ
           if (/\.xml$/i.test(pathname)) {
             if (
               !visited.has(url) &&
@@ -864,7 +843,6 @@ async function collectSitemapURLs(
             continue;
           }
 
-          // 通常ページ・PDFを収集
           if (
             allowed(url) &&
             !isExcludedFile(url)
@@ -872,7 +850,7 @@ async function collectSitemapURLs(
             found.add(url);
           }
 
-        } catch (error) {
+        } catch {
           // 無効URLは除外
         }
       }
@@ -895,6 +873,7 @@ async function collectSitemapURLs(
 
   return [...found];
 }
+
 // =============================================
 // URL収集（サイトマップ優先）
 // =============================================
@@ -911,7 +890,6 @@ async function collectURLs(
     source.base_url
   ).href;
 
-  // ① 最初にサイトマップからURLを収集
   try {
     console.log("[CRAWL] Sitemap collection started", {
       source: source.name,
@@ -941,7 +919,7 @@ async function collectURLs(
     );
   }
 
-  // ② 時間に余裕がある場合だけトップページを調査
+  // 時間に余裕がある場合だけトップページを調査
   if (remainingTime(deadline) > 1800) {
     try {
       if (allowed(baseURL)) {
@@ -974,6 +952,7 @@ async function collectURLs(
             ) {
               found.add(url);
             }
+
           } catch {
             // 無効URLを除外
           }
@@ -988,7 +967,6 @@ async function collectURLs(
     }
   }
 
-  // ③ トップページも候補に加える
   if (allowed(baseURL)) {
     found.add(baseURL);
   }
@@ -1013,6 +991,7 @@ async function collectURLs(
     feeds: [...feeds]
   };
 }
+
 // =============================================
 // カテゴリー分類
 // =============================================
@@ -1134,7 +1113,6 @@ async function saveDocument(
     throw lookupError;
   }
 
-  // 既存データの内容を比較
   if (old) {
     const oldHash = old.content_hash ||
       makeHash(
@@ -1142,7 +1120,6 @@ async function saveDocument(
         old.content || ""
       );
 
-    // 内容が同じ場合は更新せず確認時刻だけ更新
     if (oldHash === hash) {
       const { error } = await db
         .from("school_documents")
@@ -1182,33 +1159,21 @@ async function saveDocument(
 
   const row = {
     url: item.url,
-
     title: item.title,
-
     content,
-
     category: labels.category,
-
     source_date: item.source_date || null,
-
     fetched_at: now,
-
     source_id: source.id,
-
     content_hash: hash,
-
     last_seen_at: now,
-
     updated_at: now,
-
     importance: calculateImportance(
       source,
       item.title,
       content
     ),
-
     tags: labels.tags,
-
     content_type: item.content_type || "html"
   };
 
@@ -1224,7 +1189,6 @@ async function saveDocument(
 
   return old ? "updated" : "new";
 }
-
 // =============================================
 // RSS・Atom収集
 // =============================================
@@ -1375,30 +1339,32 @@ async function processSource(
   startedAt
 ) {
   const stats = emptyStats();
-
   const sourceStartedAt = Date.now();
+  const deadline = createDeadline(startedAt);
 
-  const deadline = createDeadline(
-    startedAt
-  );
-
-  const { data: log, error: logError } =
-    await db
-      .from("crawl_logs")
-      .insert({
-        source_id: source.id,
-        source_name: source.name,
-        status: "running"
-      })
-      .select("id")
-      .single();
+  const { data: log, error: logError } = await db
+    .from("crawl_logs")
+    .insert({
+      source_id: source.id,
+      source_name: source.name,
+      status: "running"
+    })
+    .select("id")
+    .single();
 
   if (logError) {
     throw logError;
   }
 
+  let status = "failed";
+  let errorMessage = null;
+
   try {
-    // robots.txt確認
+    console.log("[CRAWL] Source started", {
+      source: source.name,
+      remaining_ms: remainingTime(deadline)
+    });
+
     const allowed = await getRobotsRules(
       source,
       deadline
@@ -1408,10 +1374,13 @@ async function processSource(
       source.source_type || "html"
     ).toLowerCase();
 
-    if (
-      type === "rss" ||
-      type === "atom"
-    ) {
+    if (type === "rss" || type === "atom") {
+      if (!source.feed_url) {
+        throw new Error(
+          "RSS情報源にfeed_urlが設定されていません"
+        );
+      }
+
       await crawlFeed(
         source.feed_url,
         source,
@@ -1428,23 +1397,27 @@ async function processSource(
         deadline
       );
 
-      // RSS・Atom
       const feedURLs = new Set(
-        collected.feeds
+        collected.feeds || []
       );
 
       if (source.feed_url) {
         try {
-          const url = validateURL(
-            source.feed_url,
-            source
-          ).href;
+          feedURLs.add(
+            validateURL(
+              source.feed_url,
+              source
+            ).href
+          );
+        } catch (error) {
+          stats.errors++;
 
-          feedURLs.add(url);
-        } catch {
-          console.error(
-            "不正なfeed_url:",
-            source.name
+          console.warn(
+            "[CRAWL] Invalid feed_url",
+            {
+              source: source.name,
+              message: error.message
+            }
           );
         }
       }
@@ -1463,95 +1436,168 @@ async function processSource(
             stats,
             deadline
           );
+
         } catch (error) {
           stats.errors++;
 
           console.error(
-            "Feed取得エラー:",
-            feedURL,
-            error.message
+            "[CRAWL] Feed failed",
+            {
+              source: source.name,
+              url: feedURL,
+              message: error.message
+            }
           );
         }
       }
 
-      // HTML・PDF
       await crawlPages(
         source,
         allowed,
         db,
         stats,
         deadline,
-        collected.urls
+        collected.urls || []
       );
+    }
+
+    // foundは処理対象として試行した件数。
+    // 対象が0件、またはエラーがある場合はpartial。
+    const noTargetsFound = stats.found === 0;
+    const hasErrors = stats.errors > 0;
+
+    status = (noTargetsFound || hasErrors)
+      ? "partial"
+      : "completed";
+
+    if (noTargetsFound) {
+      errorMessage =
+        "クロール対象のページ・フィードが見つかりませんでした";
+    } else if (hasErrors) {
+      errorMessage =
+        `${stats.errors}件の収集処理でエラーが発生しました`;
     }
 
     const now = new Date().toISOString();
 
-    const hasErrors = stats.errors > 0;
+    // last_error列は存在しないため使用しない。
+    // last_success_atは正常完了時だけ更新する。
+    const sourceUpdate = {
+      last_crawled_at: now,
+      updated_at: now
+    };
 
-   const noDocumentsFound = stats.found === 0;
+    if (status === "completed") {
+      sourceUpdate.last_success_at = now;
+    }
 
-const hasErrors =
-  stats.errors > 0 ||
-  noDocumentsFound;
+    const { error: sourceUpdateError } = await db
+      .from("sources")
+      .update(sourceUpdate)
+      .eq("id", source.id);
 
-const status = hasErrors
-  ? "partial"
-  : "completed";
-
-const lastError = noDocumentsFound
-  ? "クロール対象のページを発見できませんでした"
-  : stats.errors > 0
-    ? `${stats.errors}件の収集エラー`
-    : null;
-
-const { error: sourceError } = await db
-  .from("sources")
-  .update({
-    last_crawled_at: now,
-
-    last_success_at: hasErrors
-      ? undefined
-      : now,
-
-    last_error: lastError,
-
-    updated_at: now
-  })
-  .eq("id", source.id);
-
-if (sourceError) {
-  throw sourceError;
-}hrow sourceError;
+    if (sourceUpdateError) {
+      throw sourceUpdateError;
     }
 
     const { error: logUpdateError } = await db
-  .from("crawl_logs")
-  .update({
-    status,
+      .from("crawl_logs")
+      .update({
+        status,
+        found_count: stats.found,
+        new_count: stats.new,
+        updated_count: stats.updated,
+        skipped_count: stats.skipped,
+        error_count: stats.errors,
+        error_message: errorMessage,
+        finished_at: now
+      })
+      .eq("id", log.id);
 
-    found_count: stats.found,
-    new_count: stats.new,
-    updated_count: stats.updated,
-    skipped_count: stats.skipped,
-    error_count: stats.errors,
+    if (logUpdateError) {
+      throw logUpdateError;
+    }
 
-    error_message: lastError,
+    const result = {
+      source: source.name,
+      status,
+      error: errorMessage,
+      ...stats,
+      elapsed_ms: Date.now() - sourceStartedAt
+    };
 
-    finished_at: now
-  })
-  .eq("id", log.id);
+    console.log(
+      "[CRAWL] Source completed",
+      result
+    );
 
-if (logUpdateError) {
-  throw logUpdateError;
+    return result;
+
+  } catch (error) {
+    status = "failed";
+
+    errorMessage = String(
+      error?.message || error
+    ).slice(0, 500);
+
+    const now = new Date().toISOString();
+
+    console.error(
+      "[CRAWL] Source processing failed",
+      {
+        source: source.name,
+        message: errorMessage,
+        stack: error?.stack
+      }
+    );
+
+    // 失敗時も実行時刻は記録する。
+    // last_success_atは変更しない。
+    const { error: sourceUpdateError } = await db
+      .from("sources")
+      .update({
+        last_crawled_at: now,
+        updated_at: now
+      })
+      .eq("id", source.id);
+
+    if (sourceUpdateError) {
+      console.error(
+        "[CRAWL] Source timestamp update failed",
+        {
+          source: source.name,
+          message: sourceUpdateError.message
+        }
+      );
+    }
+
+    const { error: logUpdateError } = await db
+      .from("crawl_logs")
+      .update({
+        status: "failed",
+        found_count: stats.found,
+        new_count: stats.new,
+        updated_count: stats.updated,
+        skipped_count: stats.skipped,
+        error_count: stats.errors + 1,
+        error_message: errorMessage,
+        finished_at: now
+      })
+      .eq("id", log.id);
+
+    if (logUpdateError) {
+      console.error(
+        "[CRAWL] Crawl log update failed",
+        {
+          source: source.name,
+          message: logUpdateError.message
+        }
+      );
+    }
+
+    throw error;
+  }
 }
-  return {
-  source: source.name,
-  status,
-  error: lastError,
-  ...stats,
-  elapsed_ms: Date.now() - sourceStartedAt
-};
 // =============================================
 // メインAPI
 // =============================================
@@ -1559,7 +1605,6 @@ if (logUpdateError) {
 export default async function handler(req, res) {
   const startedAt = Date.now();
 
-  // ① APIにアクセスがあった時点で必ず記録
   console.log("[CRAWL] handler started", {
     method: req.method,
     time: new Date().toISOString(),
@@ -1570,9 +1615,12 @@ export default async function handler(req, res) {
     )
   });
 
-  // ② HTTPメソッド確認
+  // HTTPメソッド確認
   if (req.method !== "GET") {
-    console.error("[CRAWL] Invalid method:", req.method);
+    console.error(
+      "[CRAWL] Invalid method:",
+      req.method
+    );
 
     return res.status(405).json({
       success: false,
@@ -1580,12 +1628,14 @@ export default async function handler(req, res) {
     });
   }
 
-  // ③ Cron認証
+  // Cron認証
   const secret = process.env.CRON_SECRET;
   const authorization = req.headers.authorization;
 
   if (!secret) {
-    console.error("[CRAWL] CRON_SECRET is missing");
+    console.error(
+      "[CRAWL] CRON_SECRET is missing"
+    );
 
     return res.status(500).json({
       success: false,
@@ -1594,9 +1644,12 @@ export default async function handler(req, res) {
   }
 
   if (authorization !== `Bearer ${secret}`) {
-    console.error("[CRAWL] Authorization failed", {
-      hasAuthorization: Boolean(authorization)
-    });
+    console.error(
+      "[CRAWL] Authorization failed",
+      {
+        hasAuthorization: Boolean(authorization)
+      }
+    );
 
     return res.status(401).json({
       success: false,
@@ -1604,39 +1657,48 @@ export default async function handler(req, res) {
     });
   }
 
-  console.log("[CRAWL] Authorization successful");
+  console.log(
+    "[CRAWL] Authorization successful"
+  );
 
   try {
-    // ④ Supabase接続
-    console.log("[CRAWL] Connecting to Supabase");
+    // Supabase接続
+    console.log(
+      "[CRAWL] Connecting to Supabase"
+    );
 
     const db = getSupabase();
 
-    // ⑤ 有効な情報源を取得
+    // 有効な情報源を取得
     const { data: sources, error } = await db
       .from("sources")
       .select("*")
       .eq("enabled", true)
-     .order("priority", {
-  ascending: false
-})
-.order("last_crawled_at", {
-  ascending: true,
-  nullsFirst: true
-});
+      .order("priority", {
+        ascending: false
+      })
+      .order("last_crawled_at", {
+        ascending: true,
+        nullsFirst: true
+      });
 
     if (error) {
-      console.error("[CRAWL] Source query failed:", error);
+      console.error(
+        "[CRAWL] Source query failed:",
+        error
+      );
 
       throw error;
     }
 
     console.log("[CRAWL] Sources loaded", {
       count: sources?.length || 0,
-      names: (sources || []).map(source => source.name)
+      names: (sources || []).map(
+        source => source.name
+      )
     });
 
-    // ⑥ 情報源を巡回
+    // 情報源を巡回
     const results = [];
     const deferred = [];
 
@@ -1653,10 +1715,13 @@ export default async function handler(req, res) {
 
       processed++;
 
-      console.log("[CRAWL] Processing source", {
-        name: source.name,
-        id: source.id
-      });
+      console.log(
+        "[CRAWL] Processing source",
+        {
+          name: source.name,
+          id: source.id
+        }
+      );
 
       try {
         const result = await processSource(
@@ -1667,25 +1732,36 @@ export default async function handler(req, res) {
 
         results.push(result);
 
-        console.log("[CRAWL] Source finished", result);
+        console.log(
+          "[CRAWL] Source finished",
+          result
+        );
 
       } catch (error) {
-        console.error("[CRAWL] Source failed", {
-          name: source.name,
-          message: error?.message
-        });
+        console.error(
+          "[CRAWL] Source failed",
+          {
+            name: source.name,
+            message: error?.message
+          }
+        );
 
         results.push({
           source: source.name,
           status: "failed",
           error: String(
             error?.message || error
-          ).slice(0, 300)
+          ).slice(0, 300),
+          found: 0,
+          new: 0,
+          updated: 0,
+          skipped: 0,
+          errors: 1
         });
       }
     }
 
-    // ⑦ 集計
+    // 集計
     const totals = results.reduce(
       (total, result) => {
         total.found += result.found || 0;
@@ -1715,7 +1791,6 @@ export default async function handler(req, res) {
       elapsedMs
     });
 
-    // ⑧ 正常終了
     return res.status(200).json({
       success: true,
       source_count: sources?.length || 0,
@@ -1727,10 +1802,13 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error("[CRAWL] Fatal error", {
-      message: error?.message,
-      stack: error?.stack
-    });
+    console.error(
+      "[CRAWL] Fatal error",
+      {
+        message: error?.message,
+        stack: error?.stack
+      }
+    );
 
     return res.status(500).json({
       success: false,
