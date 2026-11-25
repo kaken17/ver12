@@ -107,6 +107,31 @@ function cleanTextForSpeech(text) {
 
 // 日本語音声読み上げ
 function speakJapanese(text) {
+
+// 日本語の女性音声を優先して取得
+function getJapaneseFemaleVoice() {
+  const voices = window.speechSynthesis.getVoices();
+
+  const japaneseVoices = voices.filter(
+    (voice) => voice.lang.toLowerCase().startsWith("ja")
+  );
+
+  if (japaneseVoices.length === 0) {
+    return null;
+  }
+
+  // 女性音声として使われることが多い名前を優先
+  const femaleVoice = japaneseVoices.find((voice) =>
+    /female|woman|女性|haruka|nanami|kyoko/i.test(
+      voice.name
+    )
+  );
+
+  return femaleVoice || japaneseVoices[0];
+}
+
+// 日本語音声読み上げ
+function speakJapanese(text) {
   if (!speechSupported) {
     statusText.textContent =
       "このブラウザでは音声を利用できません";
@@ -118,14 +143,14 @@ function speakJapanese(text) {
   const utterance = new SpeechSynthesisUtterance(text);
 
   utterance.lang = "ja-JP";
+
+  // 自然な話し方
   utterance.rate = 0.95;
-  utterance.pitch = 1.0;
+  utterance.pitch = 1.05;
+  utterance.volume = 1.0;
 
-  const voices = window.speechSynthesis.getVoices();
-
-  const japaneseVoice = voices.find(
-    (voice) => voice.lang.toLowerCase() === "ja-jp"
-  );
+  // 日本語女性音声を優先
+  const japaneseVoice = getJapaneseFemaleVoice();
 
   if (japaneseVoice) {
     utterance.voice = japaneseVoice;
@@ -154,6 +179,22 @@ function speakJapanese(text) {
 
   window.speechSynthesis.speak(utterance);
 }
+
+// 音声一覧が後から読み込まれる場合に対応
+window.speechSynthesis.addEventListener(
+  "voiceschanged",
+  () => {
+    console.log(
+      "利用可能な日本語音声:",
+      window.speechSynthesis
+        .getVoices()
+        .filter((voice) =>
+          voice.lang.toLowerCase().startsWith("ja")
+        )
+        .map((voice) => voice.name)
+    );
+  }
+);
 
 // AIに質問を送信
 async function askAI(question) {
