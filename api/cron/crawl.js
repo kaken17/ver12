@@ -27,8 +27,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 // 基本設定
 // =============================================
 const MAX_RUN_MS = 8500;
-const SOURCE_BUDGET_MS = 6000;
-const REQUEST_TIMEOUT_MS = 1800;
+const SOURCE_BUDGET_MS = 3600;
+
+const REQUEST_TIMEOUT_MS = 2500;
 
 const MAX_PAGES_PER_SOURCE = 6;
 const MAX_PDF_PAGES = 8;
@@ -37,9 +38,13 @@ const MAX_HTML_SIZE = 2 * 1024 * 1024;
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
 
 const MAX_CONTENT_LENGTH = 12000;
+
 const MIN_CONTENT_LENGTH = 40;
+
 const MAX_FEED_ENTRIES = 10;
-const MAX_SITEMAPS = 3;
+
+const MAX_SITEMAPS = 4;
+
 const MAX_SOURCES_PER_RUN = 2;
 
 const USER_AGENT = "YameSchoolGuideBot/1.0";
@@ -336,6 +341,7 @@ async function getRobotsRules(source, deadline) {
   ).toString("utf8");
 
   const groups = [];
+  const sitemapURLs = [];
   let agents = [];
   let rules = [];
 
@@ -359,9 +365,24 @@ async function getRobotsRules(source, deadline) {
       .trim()
       .toLowerCase();
 
-    const value = line
-      .slice(index + 1)
-      .trim();
+    if (key === "sitemap" && value) {
+  try {
+    const sitemapURL = new URL(value).href;
+
+    if (
+      sitemapURL.startsWith("https://") &&
+      new URL(sitemapURL).origin ===
+        new URL(source.base_url).origin
+    ) {
+      sitemapURLs.push(sitemapURL);
+    }
+  } catch {
+    console.error(
+      "[CRAWL] Invalid sitemap URL:",
+      value
+    );
+  }
+}
 
     if (key === "user-agent") {
       if (rules.length > 0) {
@@ -405,24 +426,36 @@ async function getRobotsRules(source, deadline) {
 
     const matches = selectedRules
       .filter(rule =>
-        robotsPatternMatches(rule.path, pathname)
+       const allowed = value => {
+  const pathname = new URL(value).pathname;
+
+  const matches = selectedRules
+    .filter(rule =>
+      robotsPatternMatches(
+        rule.path,
+        pathname
       )
-      .sort((a, b) => {
-        if (b.path.length !== a.path.length) {
-          return b.path.length - a.path.length;
-        }
+    )
+    .sort((a, b) => {
+      if (b.path.length !== a.path.length) {
+        return b.path.length - a.path.length;
+      }
 
-        if (a.type === "allow") return -1;
-        if (b.type === "allow") return 1;
+      if (a.type === "allow") return -1;
+      if (b.type === "allow") return 1;
 
-        return 0;
-      });
+      return 0;
+    });
 
-    return (
-      matches.length === 0 ||
-      matches[0].type === "allow"
-    );
-  };
+  return (
+    matches.length === 0 ||
+    matches[0].type === "allow"
+  );
+};
+
+allowed.sitemaps = sitemapURLs;
+
+return allowed;
 }
 
 // =============================================
@@ -739,9 +772,186 @@ function extractSitemapLocations(xml) {
 }
 
 async function collectSitemapURLs(
+  async function collectSitemapURLs(
   source,
   allowed,
   deadline
+) {
+  const found = new Set();
+  const base = new URL(source.base_url);
+
+  // robots.txtで指定されたサイトマップを優先
+  const sitemapCandidates = [
+    ...(allowed.sitemaps || []),
+
+    // 指定がない場合の予備候補
+    new URL("/sitemap.xml", base).href,
+    new URL("/sitemap_index.xml", base).href,
+    new URL("/wp-sitemap.xml", base).href
+  ];
+
+  const visited = new Set();
+  let checkedSitemaps = 0;
+
+  for (const sitemap of [...new Set(sitemapCandidates)]) {
+    if (
+      remainingTime(deadline) < 900 ||
+      checkedSitemaps >= MAX_SITEMAPS
+    ) {
+      break;
+    }
+
+    let xml;
+
+    try {
+      const sitemapURL = validateURL(
+        sitemap,
+        source
+      ).href;
+
+      if (visited.has(sitemapURL)) {
+        continue;
+      }
+
+      visited.add(sitemapURL);
+      checkedSitemaps++;
+
+      console.log(
+        "[CRAWL] Fetching sitemap:",
+        sitemapURL
+      );
+
+      const response = await safeFetch(
+        sitemapURL,
+        source,
+        "application/xml,text/xml,*/*",
+        deadline
+      );
+
+      xml = (
+        await readLimited(
+          response,
+          MAX_HTML_SIZE
+        )
+      ).toString("utf8");
+
+    } catch (error) {
+      console.error(
+        "[CRAWL] Sitemap fetch failed:",
+        sitemap,
+        error.message
+      );
+
+      continue;
+    }
+
+    const locations = extractSitemapLocations(xml);
+
+    console.log(
+      "[CRAWL] Sitemap locations:",
+      locations.length
+    );
+
+    // サイトマップ内のURLを処理
+    for (const location of locations) {
+      if (remainingTime(deadline) < 700) {
+        break;
+      }
+
+      try {
+        const url = validateURL(
+          location,
+          source
+        ).href;
+
+        if (
+          /\.xml(?:\?|$)/i.test(url)
+        ) {
+          // 子サイトマップを取得
+          if (
+            checkedSitemaps >= MAX_SITEMAPS ||
+            visited.has(url)
+          ) {
+            continue;
+          }
+
+          checkedSitemaps++;
+          visited.add(url);
+
+          console.log(
+            "[CRAWL] Fetching child sitemap:",
+            url
+          );
+
+          const childResponse = await safeFetch(
+            url,
+            source,
+            "application/xml,text/xml,*/*",
+            deadline
+          );
+
+          const childXML = (
+            await readLimited(
+              childResponse,
+              MAX_HTML_SIZE
+            )
+          ).toString("utf8");
+
+          const childLocations =
+            extractSitemapLocations(childXML);
+
+          for (const childLocation of childLocations) {
+            try {
+              const pageURL = validateURL(
+                childLocation,
+                source
+              ).href;
+
+              if (
+                allowed(pageURL) &&
+                !isExcludedFile(pageURL) &&
+                !/\.xml$/i.test(
+                  new URL(pageURL).pathname
+                )
+              ) {
+                found.add(pageURL);
+              }
+            } catch {
+              // 無効なURLを除外
+            }
+          }
+
+        } else {
+          if (
+            allowed(url) &&
+            !isExcludedFile(url)
+          ) {
+            found.add(url);
+          }
+        }
+
+      } catch {
+        // 無効なURLを除外
+      }
+    }
+
+    if (found.size > 0) {
+      break;
+    }
+  }
+
+  console.log(
+    "[CRAWL] Sitemap collection result:",
+    {
+      source: source.name,
+      sitemap_count: checkedSitemaps,
+      found_count: found.size,
+      remaining_ms: remainingTime(deadline)
+    }
+  );
+
+  return [...found];
+}
 ) {
   const found = new Set();
 
