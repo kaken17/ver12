@@ -277,7 +277,6 @@ function robotsPatternMatches(pattern, pathname) {
 }
 
 async function getRobotsRules(source, deadline) {
- async function getRobotsRules(source, deadline) {
   const robotsURL = new URL(
     "/robots.txt",
     source.base_url
@@ -303,6 +302,13 @@ async function getRobotsRules(source, deadline) {
       )
     });
   } catch (error) {
+    console.error("[ROBOTS] Fetch failed:", {
+      source: source.name,
+      url: url.href,
+      error_name: error.name,
+      error_message: error.message
+    });
+
     throw new Error(
       `robots.txt取得失敗: ${error.name}: ${error.message}`
     );
@@ -347,23 +353,33 @@ async function getRobotsRules(source, deadline) {
 
     const index = line.indexOf(":");
 
-    const key = line.slice(0, index).trim().toLowerCase();
-    const value = line.slice(index + 1).trim();
+    const key = line
+      .slice(0, index)
+      .trim()
+      .toLowerCase();
+
+    const value = line
+      .slice(index + 1)
+      .trim();
 
     if (key === "sitemap" && value) {
       try {
-        const sitemapURL = new URL(value).href;
+        const sitemapURL = validateURL(
+          value,
+          source
+        ).href;
 
-        if (
-          sitemapURL.startsWith("https://") &&
-          new URL(sitemapURL).origin ===
-            new URL(source.base_url).origin
-        ) {
+        if (!sitemapURLs.includes(sitemapURL)) {
           sitemapURLs.push(sitemapURL);
         }
       } catch (error) {
-        console.error("[ROBOTS] Invalid sitemap:", value);
+        console.warn(
+          "[ROBOTS] Invalid sitemap URL:",
+          value
+        );
       }
+
+      continue;
     }
 
     if (key === "user-agent") {
@@ -374,6 +390,7 @@ async function getRobotsRules(source, deadline) {
       }
 
       agents.push(value.toLowerCase());
+      continue;
     }
 
     if (
@@ -403,7 +420,7 @@ async function getRobotsRules(source, deadline) {
     group => group.rules
   );
 
-  const allowed = value => {
+  function allowed(value) {
     const pathname = new URL(value).pathname;
 
     const matches = selectedRules
@@ -425,9 +442,15 @@ async function getRobotsRules(source, deadline) {
       matches.length === 0 ||
       matches[0].type === "allow"
     );
-  };
+  }
 
   allowed.sitemaps = sitemapURLs;
+
+  console.log("[ROBOTS] Parsed:", {
+    source: source.name,
+    sitemap_count: sitemapURLs.length,
+    rule_count: selectedRules.length
+  });
 
   return allowed;
 }
@@ -746,31 +769,46 @@ function extractSitemapLocations(xml) {
 }
 
 async function collectSitemapURLs(
- async function collectSitemapURLs(
   source,
   allowed,
   deadline
 ) {
   const found = new Set();
+  const visited = new Set();
+
   const base = new URL(source.base_url);
 
+  // robots.txtに記載されたURLを最優先
   const sitemapCandidates = [
     ...(allowed.sitemaps || []),
+
+    // 一般的なサイトマップ
     new URL("/sitemap.xml", base).href,
     new URL("/sitemap_index.xml", base).href,
+
+    // WordPress標準サイトマップ
     new URL("/wp-sitemap.xml", base).href
   ];
 
-  const visited = new Set();
+  const queue = [
+    ...new Set(sitemapCandidates)
+  ];
+
   let checkedSitemaps = 0;
 
-  for (const sitemap of [...new Set(sitemapCandidates)]) {
-    if (
-      remainingTime(deadline) < 900 ||
-      checkedSitemaps >= MAX_SITEMAPS
-    ) {
-      break;
+  while (
+    queue.length > 0 &&
+    checkedSitemaps < MAX_SITEMAPS &&
+    remainingTime(deadline) > 700
+  ) {
+    const sitemap = queue.shift();
+
+    if (visited.has(sitemap)) {
+      continue;
     }
+
+    visited.add(sitemap);
+    checkedSitemaps++;
 
     try {
       const sitemapURL = validateURL(
@@ -778,125 +816,85 @@ async function collectSitemapURLs(
         source
       ).href;
 
-      if (visited.has(sitemapURL)) {
-        continue;
-      }
-
-      visited.add(sitemapURL);
-      checkedSitemaps++;
-
-      console.log("[CRAWL] Fetching sitemap:", sitemapURL);
-
       const response = await safeFetch(
         sitemapURL,
         source,
-        "application/xml,text/xml,*/*",
+        "application/xml,text/xml,application/xhtml+xml",
         deadline
       );
 
       const xml = (
-        await readLimited(response, MAX_HTML_SIZE)
+        await readLimited(
+          response,
+          MAX_HTML_SIZE
+        )
       ).toString("utf8");
 
       const locations = extractSitemapLocations(xml);
 
-      console.log(
-        "[CRAWL] Sitemap locations:",
-        locations.length
-      );
+      console.log("[SITEMAP] Read:", {
+        source: source.name,
+        url: sitemapURL,
+        location_count: locations.length
+      });
 
       for (const location of locations) {
-        if (remainingTime(deadline) < 700) {
+        if (remainingTime(deadline) < 500) {
           break;
         }
 
         try {
-          const url = validateURL(location, source).href;
+          const url = validateURL(
+            location,
+            source
+          ).href;
 
-          if (/\.xml(?:\?|$)/i.test(url)) {
+          const pathname = new URL(url).pathname;
+
+          // 子サイトマップなら次の取得候補へ
+          if (/\.xml$/i.test(pathname)) {
             if (
-              checkedSitemaps >= MAX_SITEMAPS ||
-              visited.has(url)
+              !visited.has(url) &&
+              !queue.includes(url) &&
+              checkedSitemaps + queue.length < MAX_SITEMAPS
             ) {
-              continue;
+              queue.push(url);
             }
 
-            checkedSitemaps++;
-            visited.add(url);
+            continue;
+          }
 
-            const childResponse = await safeFetch(
-              url,
-              source,
-              "application/xml,text/xml,*/*",
-              deadline
-            );
-
-            const childXML = (
-              await readLimited(
-                childResponse,
-                MAX_HTML_SIZE
-              )
-            ).toString("utf8");
-
-            const childLocations =
-              extractSitemapLocations(childXML);
-
-            for (const childLocation of childLocations) {
-              try {
-                const pageURL = validateURL(
-                  childLocation,
-                  source
-                ).href;
-
-                if (
-                  allowed(pageURL) &&
-                  !isExcludedFile(pageURL) &&
-                  !/\.xml$/i.test(
-                    new URL(pageURL).pathname
-                  )
-                ) {
-                  found.add(pageURL);
-                }
-              } catch {
-                // 無効なURLを除外
-              }
-            }
-          } else if (
+          // 通常ページ・PDFを収集
+          if (
             allowed(url) &&
             !isExcludedFile(url)
           ) {
             found.add(url);
           }
+
         } catch (error) {
-          console.error(
-            "[CRAWL] Invalid sitemap location:",
-            error.message
-          );
+          // 無効URLは除外
         }
       }
 
-      if (found.size > 0) {
-        break;
-      }
     } catch (error) {
-      console.error(
-        "[CRAWL] Sitemap fetch failed:",
-        sitemap,
-        error.message
-      );
+      console.warn("[SITEMAP] Fetch failed:", {
+        source: source.name,
+        url: sitemap,
+        error: error.message
+      });
     }
   }
 
-  console.log("[CRAWL] Sitemap collection result:", {
+  console.log("[SITEMAP] Collection completed:", {
     source: source.name,
-    sitemap_count: checkedSitemaps,
-    found_count: found.size,
+    checked_sitemaps: checkedSitemaps,
+    found_urls: found.size,
     remaining_ms: remainingTime(deadline)
   });
 
   return [...found];
 }
-
 // =============================================
 // URL収集（サイトマップ優先）
 // =============================================
@@ -1491,92 +1489,69 @@ async function processSource(
 
     const hasErrors = stats.errors > 0;
 
-    const { error: sourceError } = await db
-      .from("sources")
-      .update({
-        last_crawled_at: now,
-        last_success_at: now,
-        last_error: hasErrors
-          ? `${stats.errors}件の収集エラー`
-          : null,
-        updated_at: now
-      })
-      .eq("id", source.id);
+   const noDocumentsFound = stats.found === 0;
 
-    if (sourceError) {
-      throw sourceError;
+const hasErrors =
+  stats.errors > 0 ||
+  noDocumentsFound;
+
+const status = hasErrors
+  ? "partial"
+  : "completed";
+
+const lastError = noDocumentsFound
+  ? "クロール対象のページを発見できませんでした"
+  : stats.errors > 0
+    ? `${stats.errors}件の収集エラー`
+    : null;
+
+const { error: sourceError } = await db
+  .from("sources")
+  .update({
+    last_crawled_at: now,
+
+    last_success_at: hasErrors
+      ? undefined
+      : now,
+
+    last_error: lastError,
+
+    updated_at: now
+  })
+  .eq("id", source.id);
+
+if (sourceError) {
+  throw sourceError;
+}hrow sourceError;
     }
 
     const { error: logUpdateError } = await db
-      .from("crawl_logs")
-      .update({
-        status: hasErrors
-          ? "partial"
-          : "completed",
+  .from("crawl_logs")
+  .update({
+    status,
 
-        found_count: stats.found,
+    found_count: stats.found,
+    new_count: stats.new,
+    updated_count: stats.updated,
+    skipped_count: stats.skipped,
+    error_count: stats.errors,
 
-        new_count: stats.new,
+    error_message: lastError,
 
-        updated_count: stats.updated,
+    finished_at: now
+  })
+  .eq("id", log.id);
 
-        skipped_count: stats.skipped,
-
-        error_count: stats.errors,
-
-        finished_at: now
-      })
-      .eq("id", log.id);
-
-    if (logUpdateError) {
-      throw logUpdateError;
-    }
-
-    return {
-      source: source.name,
-      status: hasErrors
-        ? "partial"
-        : "completed",
-      ...stats,
-      elapsed_ms: Date.now() - sourceStartedAt
-    };
-
-  } catch (error) {
-    const message = String(
-      error.message || error
-    ).slice(0, 300);
-
-    const now = new Date().toISOString();
-
-    await db
-      .from("sources")
-      .update({
-        last_crawled_at: now,
-        last_error: message,
-        updated_at: now
-      })
-      .eq("id", source.id);
-
-    await db
-      .from("crawl_logs")
-      .update({
-        status: "failed",
-        error_message: message,
-        error_count: stats.errors + 1,
-        finished_at: now
-      })
-      .eq("id", log.id);
-
-    return {
-      source: source.name,
-      status: "failed",
-      error: message,
-      ...stats,
-      elapsed_ms: Date.now() - sourceStartedAt
-    };
-  }
+if (logUpdateError) {
+  throw logUpdateError;
 }
-
+  return {
+  source: source.name,
+  status,
+  error: lastError,
+  ...stats,
+  elapsed_ms: Date.now() - sourceStartedAt
+};
 // =============================================
 // メインAPI
 // =============================================
