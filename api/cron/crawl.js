@@ -277,6 +277,7 @@ function robotsPatternMatches(pattern, pathname) {
 }
 
 async function getRobotsRules(source, deadline) {
+ async function getRobotsRules(source, deadline) {
   const robotsURL = new URL(
     "/robots.txt",
     source.base_url
@@ -286,9 +287,7 @@ async function getRobotsRules(source, deadline) {
   const remaining = remainingTime(deadline);
 
   if (remaining < 300) {
-    throw new Error(
-      "robots.txt確認時間が不足しています"
-    );
+    throw new Error("robots.txt確認時間が不足しています");
   }
 
   let response;
@@ -304,36 +303,23 @@ async function getRobotsRules(source, deadline) {
       )
     });
   } catch (error) {
-    console.error("[ROBOTS] Fetch failed:", {
-      source: source.name,
-      url: url.href,
-      error_name: error.name,
-      error_message: error.message,
-      remaining_ms: remainingTime(deadline)
-    });
-
     throw new Error(
       `robots.txt取得失敗: ${error.name}: ${error.message}`
     );
   }
 
   if (response.status === 404) {
-    return () => true;
+    const allowed = () => true;
+    allowed.sitemaps = [];
+    return allowed;
   }
 
-  if (
-    response.status >= 300 &&
-    response.status < 400
-  ) {
-    throw new Error(
-      "robots.txtのリダイレクトを拒否しました"
-    );
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error("robots.txtのリダイレクトを拒否しました");
   }
 
   if (!response.ok) {
-    throw new Error(
-      `robots.txt HTTP ${response.status}`
-    );
+    throw new Error(`robots.txt HTTP ${response.status}`);
   }
 
   const text = (
@@ -342,6 +328,7 @@ async function getRobotsRules(source, deadline) {
 
   const groups = [];
   const sitemapURLs = [];
+
   let agents = [];
   let rules = [];
 
@@ -360,29 +347,24 @@ async function getRobotsRules(source, deadline) {
 
     const index = line.indexOf(":");
 
-    const key = line
-      .slice(0, index)
-      .trim()
-      .toLowerCase();
+    const key = line.slice(0, index).trim().toLowerCase();
+    const value = line.slice(index + 1).trim();
 
     if (key === "sitemap" && value) {
-  try {
-    const sitemapURL = new URL(value).href;
+      try {
+        const sitemapURL = new URL(value).href;
 
-    if (
-      sitemapURL.startsWith("https://") &&
-      new URL(sitemapURL).origin ===
-        new URL(source.base_url).origin
-    ) {
-      sitemapURLs.push(sitemapURL);
+        if (
+          sitemapURL.startsWith("https://") &&
+          new URL(sitemapURL).origin ===
+            new URL(source.base_url).origin
+        ) {
+          sitemapURLs.push(sitemapURL);
+        }
+      } catch (error) {
+        console.error("[ROBOTS] Invalid sitemap:", value);
+      }
     }
-  } catch {
-    console.error(
-      "[CRAWL] Invalid sitemap URL:",
-      value
-    );
-  }
-}
 
     if (key === "user-agent") {
       if (rules.length > 0) {
@@ -421,41 +403,33 @@ async function getRobotsRules(source, deadline) {
     group => group.rules
   );
 
-  return value => {
+  const allowed = value => {
     const pathname = new URL(value).pathname;
 
     const matches = selectedRules
       .filter(rule =>
-       const allowed = value => {
-  const pathname = new URL(value).pathname;
-
-  const matches = selectedRules
-    .filter(rule =>
-      robotsPatternMatches(
-        rule.path,
-        pathname
+        robotsPatternMatches(rule.path, pathname)
       )
-    )
-    .sort((a, b) => {
-      if (b.path.length !== a.path.length) {
-        return b.path.length - a.path.length;
-      }
+      .sort((a, b) => {
+        if (b.path.length !== a.path.length) {
+          return b.path.length - a.path.length;
+        }
 
-      if (a.type === "allow") return -1;
-      if (b.type === "allow") return 1;
+        if (a.type === "allow") return -1;
+        if (b.type === "allow") return 1;
 
-      return 0;
-    });
+        return 0;
+      });
 
-  return (
-    matches.length === 0 ||
-    matches[0].type === "allow"
-  );
-};
+    return (
+      matches.length === 0 ||
+      matches[0].type === "allow"
+    );
+  };
 
-allowed.sitemaps = sitemapURLs;
+  allowed.sitemaps = sitemapURLs;
 
-return allowed;
+  return allowed;
 }
 
 // =============================================
@@ -772,7 +746,7 @@ function extractSitemapLocations(xml) {
 }
 
 async function collectSitemapURLs(
-  async function collectSitemapURLs(
+ async function collectSitemapURLs(
   source,
   allowed,
   deadline
@@ -780,11 +754,8 @@ async function collectSitemapURLs(
   const found = new Set();
   const base = new URL(source.base_url);
 
-  // robots.txtで指定されたサイトマップを優先
   const sitemapCandidates = [
     ...(allowed.sitemaps || []),
-
-    // 指定がない場合の予備候補
     new URL("/sitemap.xml", base).href,
     new URL("/sitemap_index.xml", base).href,
     new URL("/wp-sitemap.xml", base).href
@@ -801,8 +772,6 @@ async function collectSitemapURLs(
       break;
     }
 
-    let xml;
-
     try {
       const sitemapURL = validateURL(
         sitemap,
@@ -816,164 +785,12 @@ async function collectSitemapURLs(
       visited.add(sitemapURL);
       checkedSitemaps++;
 
-      console.log(
-        "[CRAWL] Fetching sitemap:",
-        sitemapURL
-      );
+      console.log("[CRAWL] Fetching sitemap:", sitemapURL);
 
       const response = await safeFetch(
         sitemapURL,
         source,
         "application/xml,text/xml,*/*",
-        deadline
-      );
-
-      xml = (
-        await readLimited(
-          response,
-          MAX_HTML_SIZE
-        )
-      ).toString("utf8");
-
-    } catch (error) {
-      console.error(
-        "[CRAWL] Sitemap fetch failed:",
-        sitemap,
-        error.message
-      );
-
-      continue;
-    }
-
-    const locations = extractSitemapLocations(xml);
-
-    console.log(
-      "[CRAWL] Sitemap locations:",
-      locations.length
-    );
-
-    // サイトマップ内のURLを処理
-    for (const location of locations) {
-      if (remainingTime(deadline) < 700) {
-        break;
-      }
-
-      try {
-        const url = validateURL(
-          location,
-          source
-        ).href;
-
-        if (
-          /\.xml(?:\?|$)/i.test(url)
-        ) {
-          // 子サイトマップを取得
-          if (
-            checkedSitemaps >= MAX_SITEMAPS ||
-            visited.has(url)
-          ) {
-            continue;
-          }
-
-          checkedSitemaps++;
-          visited.add(url);
-
-          console.log(
-            "[CRAWL] Fetching child sitemap:",
-            url
-          );
-
-          const childResponse = await safeFetch(
-            url,
-            source,
-            "application/xml,text/xml,*/*",
-            deadline
-          );
-
-          const childXML = (
-            await readLimited(
-              childResponse,
-              MAX_HTML_SIZE
-            )
-          ).toString("utf8");
-
-          const childLocations =
-            extractSitemapLocations(childXML);
-
-          for (const childLocation of childLocations) {
-            try {
-              const pageURL = validateURL(
-                childLocation,
-                source
-              ).href;
-
-              if (
-                allowed(pageURL) &&
-                !isExcludedFile(pageURL) &&
-                !/\.xml$/i.test(
-                  new URL(pageURL).pathname
-                )
-              ) {
-                found.add(pageURL);
-              }
-            } catch {
-              // 無効なURLを除外
-            }
-          }
-
-        } else {
-          if (
-            allowed(url) &&
-            !isExcludedFile(url)
-          ) {
-            found.add(url);
-          }
-        }
-
-      } catch {
-        // 無効なURLを除外
-      }
-    }
-
-    if (found.size > 0) {
-      break;
-    }
-  }
-
-  console.log(
-    "[CRAWL] Sitemap collection result:",
-    {
-      source: source.name,
-      sitemap_count: checkedSitemaps,
-      found_count: found.size,
-      remaining_ms: remainingTime(deadline)
-    }
-  );
-
-  return [...found];
-}
-) {
-  const found = new Set();
-
-  const base = new URL(source.base_url);
-
-  const sitemapCandidates = [
-    new URL("/sitemap.xml", base).href,
-    new URL("/sitemap_index.xml", base).href
-  ];
-
-  let checkedSitemaps = 0;
-
-  for (const sitemap of sitemapCandidates) {
-    if (remainingTime(deadline) < 700) {
-      break;
-    }
-
-    try {
-      const response = await safeFetch(
-        sitemap,
-        source,
-        "application/xml,text/xml",
         deadline
       );
 
@@ -983,35 +800,34 @@ async function collectSitemapURLs(
 
       const locations = extractSitemapLocations(xml);
 
+      console.log(
+        "[CRAWL] Sitemap locations:",
+        locations.length
+      );
+
       for (const location of locations) {
-        if (
-          checkedSitemaps >= MAX_SITEMAPS ||
-          remainingTime(deadline) < 700
-        ) {
+        if (remainingTime(deadline) < 700) {
           break;
         }
 
-        // サイトマップの中に別のサイトマップがある場合
-        if (/\.xml(?:\?|$)/i.test(location)) {
-          try {
-            const childURL = validateURL(
-              location,
-              source
-            ).href;
+        try {
+          const url = validateURL(location, source).href;
 
+          if (/\.xml(?:\?|$)/i.test(url)) {
             if (
-              !allowed(childURL) ||
-              childURL === sitemap
+              checkedSitemaps >= MAX_SITEMAPS ||
+              visited.has(url)
             ) {
               continue;
             }
 
             checkedSitemaps++;
+            visited.add(url);
 
             const childResponse = await safeFetch(
-              childURL,
+              url,
               source,
-              "application/xml,text/xml",
+              "application/xml,text/xml,*/*",
               deadline
             );
 
@@ -1022,57 +838,61 @@ async function collectSitemapURLs(
               )
             ).toString("utf8");
 
-            for (const childLocation of extractSitemapLocations(childXML)) {
+            const childLocations =
+              extractSitemapLocations(childXML);
+
+            for (const childLocation of childLocations) {
               try {
-                const url = validateURL(
+                const pageURL = validateURL(
                   childLocation,
                   source
                 ).href;
 
                 if (
-                  allowed(url) &&
-                  !isExcludedFile(url)
+                  allowed(pageURL) &&
+                  !isExcludedFile(pageURL) &&
+                  !/\.xml$/i.test(
+                    new URL(pageURL).pathname
+                  )
                 ) {
-                  found.add(url);
+                  found.add(pageURL);
                 }
               } catch {
-                // 無効URLを除外
+                // 無効なURLを除外
               }
             }
-
-          } catch {
-            // 個別サイトマップの失敗はスキップ
-          }
-
-          continue;
-        }
-
-        try {
-          const url = validateURL(
-            location,
-            source
-          ).href;
-
-          if (
+          } else if (
             allowed(url) &&
             !isExcludedFile(url)
           ) {
             found.add(url);
           }
-
-        } catch {
-          // 無効URLを除外
+        } catch (error) {
+          console.error(
+            "[CRAWL] Invalid sitemap location:",
+            error.message
+          );
         }
       }
 
       if (found.size > 0) {
         break;
       }
-
-    } catch {
-      // 次のサイトマップを確認
+    } catch (error) {
+      console.error(
+        "[CRAWL] Sitemap fetch failed:",
+        sitemap,
+        error.message
+      );
     }
   }
+
+  console.log("[CRAWL] Sitemap collection result:", {
+    source: source.name,
+    sitemap_count: checkedSitemaps,
+    found_count: found.size,
+    remaining_ms: remainingTime(deadline)
+  });
 
   return [...found];
 }
