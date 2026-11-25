@@ -782,10 +782,6 @@ function discoverFeeds(html, source, allowed) {
   return [...feeds];
 }
 
-// =============================================
-// サイトマップ解析
-// =============================================
-
 
 // =============================================
 // サイトマップ解析
@@ -803,39 +799,27 @@ function extractSitemapLocations(xml) {
       /<(?:[\w.-]+:)?loc>\s*(.*?)\s*<\/(?:[\w.-]+:)?loc>/gi
     )
   ].map(match =>
-    match[1]
-      .trim()
-      .replace(/&amp;/g, "&")
+    match[1].trim().replace(/&amp;/g, "&")
   );
 
   return {
-    type: isIndex
-      ? "index"
-      : isURLSet
-        ? "urlset"
-        : "unknown",
+    type: isIndex ? "index" : isURLSet ? "urlset" : "unknown",
     locations
   };
 }
 
-async function collectSitemapURLs(
-  source,
-  allowed,
-  deadline
-) {
+async function collectSitemapURLs(source, allowed, deadline) {
   const found = new Set();
   const visited = new Set();
   const base = new URL(source.base_url);
 
-  const sitemapCandidates = [
-    ...(allowed.sitemaps || []),
-    new URL("/sitemap.xml", base).href,
-    new URL("/sitemap_index.xml", base).href,
-    new URL("/wp-sitemap.xml", base).href
-  ];
-
   const queue = [
-    ...new Set(sitemapCandidates)
+    ...new Set([
+      ...(allowed.sitemaps || []),
+      new URL("/sitemap.xml", base).href,
+      new URL("/sitemap_index.xml", base).href,
+      new URL("/wp-sitemap.xml", base).href
+    ])
   ];
 
   let checkedSitemaps = 0;
@@ -847,18 +831,13 @@ async function collectSitemapURLs(
   ) {
     const sitemap = queue.shift();
 
-    if (visited.has(sitemap)) {
-      continue;
-    }
+    if (visited.has(sitemap)) continue;
 
     visited.add(sitemap);
     checkedSitemaps++;
 
     try {
-      const sitemapURL = validateURL(
-        sitemap,
-        source
-      ).href;
+      const sitemapURL = validateURL(sitemap, source).href;
 
       const response = await safeFetch(
         sitemapURL,
@@ -868,10 +847,7 @@ async function collectSitemapURLs(
       );
 
       const xml = (
-        await readLimited(
-          response,
-          MAX_HTML_SIZE
-        )
+        await readLimited(response, MAX_HTML_SIZE)
       ).toString("utf8");
 
       const parsed = extractSitemapLocations(xml);
@@ -885,9 +861,7 @@ async function collectSitemapURLs(
 
       if (parsed.type === "index") {
         for (const location of parsed.locations) {
-          if (remainingTime(deadline) < 500) {
-            break;
-          }
+          if (remainingTime(deadline) < 500) break;
 
           try {
             const childURL = validateURL(
@@ -903,7 +877,7 @@ async function collectSitemapURLs(
               queue.push(childURL);
             }
           } catch {
-            // 許可されていない子サイトマップは除外
+            // 許可されていないURLは除外
           }
         }
 
@@ -919,9 +893,7 @@ async function collectSitemapURLs(
       }
 
       for (const location of parsed.locations) {
-        if (remainingTime(deadline) < 500) {
-          break;
-        }
+        if (remainingTime(deadline) < 500) break;
 
         try {
           const url = validateURL(
@@ -929,10 +901,7 @@ async function collectSitemapURLs(
             source
           ).href;
 
-          if (
-            allowed(url) &&
-            !isExcludedFile(url)
-          ) {
+          if (allowed(url) && !isExcludedFile(url)) {
             found.add(url);
           }
         } catch {
