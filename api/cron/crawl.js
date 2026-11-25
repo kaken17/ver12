@@ -808,7 +808,12 @@ function extractSitemapLocations(xml) {
   };
 }
 
-async function collectSitemapURLs(source, allowed, deadline) {
+async function collectSitemapURLs(
+  source,
+  allowed,
+  deadline,
+  stats
+) {
   const found = new Set();
   const visited = new Set();
   const base = new URL(source.base_url);
@@ -923,7 +928,9 @@ async function collectSitemapURLs(source, allowed, deadline) {
     found_urls: found.size,
     remaining_ms: remainingTime(deadline)
   });
-
+  stats.diagnostics.push(
+    `サイトマップ確認数: ${checkedSitemaps}件 / 発見URL数: ${found.size}件`
+  );
   return [...found];
 }
 
@@ -951,10 +958,15 @@ async function collectURLs(
     });
 
     const sitemapURLs = await collectSitemapURLs(
-      source,
-      allowed,
-      deadline
-    );
+  source,
+  allowed,
+  deadline,
+  stats
+);
+
+stats.diagnostics.push(
+  `サイトマップ取得結果: ${sitemapURLs.length}件`
+);
 
     for (const url of sitemapURLs) {
       found.add(url);
@@ -975,6 +987,9 @@ async function collectURLs(
 
   // 時間に余裕がある場合だけトップページを調査
   if (remainingTime(deadline) > 1800) {
+        stats.diagnostics.push(
+      "トップページ調査を開始"
+    );
     try {
       if (allowed(baseURL)) {
         const html = await getHTML(
@@ -1013,12 +1028,23 @@ async function collectURLs(
         });
       }
 
-    } catch (error) {
+       } catch (error) {
+      const message = error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error);
+
+      stats.diagnostics.push(
+        `トップページ調査失敗: ${message}`
+      );
+
       console.error(
         "[CRAWL] Homepage collection error:",
-        error.message
+        message
       );
-    }
+    }  } else {
+    stats.diagnostics.push(
+      `トップページ調査を省略: 残り時間 ${remainingTime(deadline)}ms`
+    );
   }
 
   if (allowed(baseURL)) {
@@ -1400,7 +1426,9 @@ function emptyStats() {
     new: 0,
     updated: 0,
     skipped: 0,
-    errors: 0
+    errors: 0,
+    errorDetails: [],
+    diagnostics: []
   };
 }
 
@@ -1570,9 +1598,22 @@ async function processSource(
 
       errorMessage = errorMessage.slice(0, 500);
 
-    } else if (noTargetsFound) {
-      errorMessage =
-        "クロール対象のページ・フィードが見つかりませんでした";
+    } else     if (noTargetsFound || hasErrors) {
+      const summary = hasErrors
+        ? `${stats.errors}件の収集処理でエラーが発生しました`
+        : "クロール対象のページ・フィードが見つかりませんでした";
+
+      const details = [
+        ...(stats.errorDetails || []).map(item =>
+          `${item.type}: URL=${item.url} / ${item.message}`
+        ),
+        ...(stats.diagnostics || [])
+      ];
+
+      errorMessage = [
+        summary,
+        ...details
+      ].join(" | ").slice(0, 500);
     }
 
     const now = new Date().toISOString();
