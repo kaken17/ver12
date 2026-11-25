@@ -106,24 +106,24 @@ function cleanTextForSpeech(text) {
 // 日本語音声読み上げ
 
 // 日本語の女性音声を優先して取得
+// Microsoft Harukaを優先して取得
 function getJapaneseFemaleVoice() {
   const voices = window.speechSynthesis.getVoices();
 
-  const japaneseVoices = voices.filter(
-    (voice) => voice.lang.toLowerCase().startsWith("ja")
+  const haruka = voices.find(
+    (voice) =>
+      voice.name ===
+      "Microsoft Haruka - Japanese (Japan)"
   );
 
-  if (japaneseVoices.length === 0) {
-    return null;
+  if (haruka) {
+    return haruka;
   }
 
-  const femaleVoice = japaneseVoices.find((voice) =>
-    /female|woman|女性|haruka|nanami|kyoko/i.test(
-      voice.name
-    )
-  );
-
-  return femaleVoice || japaneseVoices[0];
+  // Harukaが利用できない場合は日本語音声にフォールバック
+  return voices.find(
+    (voice) => voice.lang.toLowerCase().startsWith("ja")
+  ) || null;
 }
 
 // 日本語音声読み上げ
@@ -139,7 +139,7 @@ function speakJapanese(text) {
   const utterance = new SpeechSynthesisUtterance(text);
 
   utterance.lang = "ja-JP";
-  utterance.rate = 0.95;
+  utterance.rate = 0.92;
   utterance.pitch = 1.05;
   utterance.volume = 1.0;
 
