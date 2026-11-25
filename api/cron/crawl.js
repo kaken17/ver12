@@ -1300,17 +1300,34 @@ async function crawlFeed(
 
       stats[result]++;
 
+   
     } catch (error) {
       stats.errors++;
 
+      const errorDetail =
+        error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : String(error);
+
       console.error(
         "RSS保存エラー:",
-        error.message
+        {
+          source: source.name,
+          url: item.url,
+          error: errorDetail,
+        }
       );
-    }
-  }
-}
 
+      // 後から原因を確認できるように保存
+      stats.errorDetails ??= [];
+      stats.errorDetails.push({
+        type: "rss_save",
+        url: item.url,
+        message: errorDetail,
+      });
+    }
+   }
+}
 // =============================================
 // HTML・PDF巡回
 // =============================================
@@ -1397,6 +1414,7 @@ async function processSource(
   startedAt
 ) {
   const stats = emptyStats();
+  stats.errorDetails = [];
   const sourceStartedAt = Date.now();
   const deadline = createDeadline(startedAt);
 
@@ -1467,18 +1485,29 @@ async function processSource(
               source
             ).href
           );
-        } catch (error) {
-          stats.errors++;
+          } catch (error) {
+      stats.errors++;
 
-          console.warn(
-            "[CRAWL] Invalid feed_url",
-            {
-              source: source.name,
-              message: error.message
-            }
-          );
+      const errorDetail =
+        error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : String(error);
+
+      stats.errorDetails.push({
+        type: "rss_save",
+        url: item.url,
+        message: errorDetail
+      });
+
+      console.error(
+        "RSS保存エラー:",
+        {
+          source: source.name,
+          url: item.url,
+          error: errorDetail
         }
-      }
+      );
+    }
 
       for (const feedURL of feedURLs) {
         if (remainingTime(deadline) < 600) {
@@ -1528,12 +1557,22 @@ async function processSource(
       ? "partial"
       : "completed";
 
-    if (noTargetsFound) {
+      if (hasErrors) {
+      const details = stats.errorDetails
+        .map(item =>
+          `${item.type} URL=${item.url} ${item.message}`
+        )
+        .join(" | ");
+
+      errorMessage =
+        `${stats.errors}件の収集処理でエラーが発生しました` +
+        (details ? ` / 詳細: ${details}` : "");
+
+      errorMessage = errorMessage.slice(0, 500);
+
+    } else if (noTargetsFound) {
       errorMessage =
         "クロール対象のページ・フィードが見つかりませんでした";
-    } else if (hasErrors) {
-      errorMessage =
-        `${stats.errors}件の収集処理でエラーが発生しました`;
     }
 
     const now = new Date().toISOString();
@@ -1608,7 +1647,13 @@ async function processSource(
         stack: error?.stack
       }
     );
-
+          stats.errorDetails.push({
+            type: "feed_fetch",
+            url: feedURL,
+            message: error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error)
+          });
     // 失敗時も実行時刻は記録する。
     // last_success_atは変更しない。
     const { error: sourceUpdateError } = await db
