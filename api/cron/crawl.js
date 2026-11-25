@@ -121,7 +121,79 @@ function isExcludedFile(url) {
 // =============================================
 // HTTP取得
 // =============================================
+async function fetchWithSafeRedirects(
+  value,
+  source,
+  accept,
+  deadline,
+  timeout = REQUEST_TIMEOUT_MS
+) {
+  let currentURL = validateURL(value, source);
+  const MAX_REDIRECTS = 3;
 
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    const remaining = remainingTime(deadline);
+
+    if (remaining < 300) {
+      throw new Error("実行時間の上限に達しました");
+    }
+
+    const response = await fetch(currentURL.href, {
+      method: "GET",
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept": accept || "*/*"
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(
+        Math.min(timeout, remaining)
+      )
+    });
+
+    if (
+      response.status >= 300 &&
+      response.status < 400
+    ) {
+      const location = response.headers.get("location");
+
+      if (!location) {
+        throw new Error(
+          "転送先URLが指定されていません"
+        );
+      }
+
+      if (redirects >= MAX_REDIRECTS) {
+        throw new Error(
+          "リダイレクト回数の上限を超えました"
+        );
+      }
+
+      let nextURL;
+
+      try {
+        nextURL = validateURL(
+          new URL(location, currentURL).href,
+          source
+        );
+      } catch {
+        throw new Error(
+          "許可されていない転送先URLです"
+        );
+      }
+
+      if (response.body) {
+        await response.body.cancel().catch(() => {});
+      }
+
+      currentURL = nextURL;
+      continue;
+    }
+
+    return response;
+  }
+
+  throw new Error("リダイレクト処理に失敗しました");
+}
 async function safeFetch(
   value,
   source,
@@ -129,45 +201,20 @@ async function safeFetch(
   deadline,
   timeout = REQUEST_TIMEOUT_MS
 ) {
-  const url = validateURL(value, source);
-  const remaining = remainingTime(deadline);
-
-  if (remaining < 300) {
-    throw new Error(
-      "実行時間の上限に達しました"
-    );
-  }
-
-  const response = await fetch(url.href, {
-    method: "GET",
-    headers: {
-      "User-Agent": USER_AGENT,
-      "Accept": accept || "*/*"
-    },
-    redirect: "manual",
-    signal: AbortSignal.timeout(
-      Math.min(timeout, remaining)
-    )
-  });
-
-  if (
-    response.status >= 300 &&
-    response.status < 400
-  ) {
-    throw new Error(
-      "リダイレクトを拒否しました"
-    );
-  }
+  const response = await fetchWithSafeRedirects(
+    value,
+    source,
+    accept,
+    deadline,
+    timeout
+  );
 
   if (!response.ok) {
-    throw new Error(
-      `HTTP ${response.status}`
-    );
+    throw new Error(`HTTP ${response.status}`);
   }
 
   return response;
 }
-
 // =============================================
 // サイズ制限付き読み込み
 // =============================================
@@ -281,18 +328,15 @@ async function getRobotsRules(source, deadline) {
     );
   }
 
-  let response;
+    let response;
 
   try {
-    response = await fetch(url.href, {
-      headers: {
-        "User-Agent": USER_AGENT
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(
-        Math.min(REQUEST_TIMEOUT_MS, remaining)
-      )
-    });
+    response = await fetchWithSafeRedirects(
+      url.href,
+      source,
+      "text/plain",
+      deadline
+    );
   } catch (error) {
     console.error("[ROBOTS] Fetch failed:", {
       source: source.name,
@@ -742,14 +786,31 @@ function discoverFeeds(html, source, allowed) {
 // サイトマップ解析
 // =============================================
 
-function extractSitemapLocations(xml) {
-  return [
-    ...xml.matchAll(/<loc>\s*(.*?)\s*<\/loc>/gi)
+function extractSitemapLocations(xml) {function extractSitemapLocations(xml) {
+  const isIndex =
+    /<(?:[\w.-]+:)?sitemapindex\b/i.test(xml);
+
+  const isURLSet =
+    /<(?:[\w.-]+:)?urlset\b/i.test(xml);
+
+  const locations = [
+    ...xml.matchAll(
+      /<(?:[\w.-]+:)?loc>\s*(.*?)\s*<\/(?:[\w.-]+:)?loc>/gi
+    )
   ].map(match =>
     match[1]
       .trim()
       .replace(/&amp;/g, "&")
   );
+
+  return {
+    type: isIndex
+      ? "index"
+      : isURLSet
+        ? "urlset"
+        : "unknown",
+    locations
+  };
 }
 
 async function collectSitemapURLs(
@@ -761,7 +822,6 @@ async function collectSitemapURLs(
   const visited = new Set();
   const base = new URL(source.base_url);
 
-  // robots.txt記載URLを優先し、一般的な候補も確認
   const sitemapCandidates = [
     ...(allowed.sitemaps || []),
     new URL("/sitemap.xml", base).href,
@@ -809,15 +869,53 @@ async function collectSitemapURLs(
         )
       ).toString("utf8");
 
-      const locations = extractSitemapLocations(xml);
+      const parsed = extractSitemapLocations(xml);
 
       console.log("[SITEMAP] Read:", {
         source: source.name,
         url: sitemapURL,
-        location_count: locations.length
+        type: parsed.type,
+        location_count: parsed.locations.length
       });
 
-      for (const location of locations) {
+      if (parsed.type === "index") {
+        // sitemapindexの場合だけ、子サイトマップを追加
+        for (const location of parsed.locations) {
+          if (remainingTime(deadline) < 500) {
+            break;
+          }
+
+          try {
+            const childURL = validateURL(
+              location,
+              source
+            ).href;
+
+            if (
+              !visited.has(childURL) &&
+              !queue.includes(childURL) &&
+              checkedSitemaps + queue.length < MAX_SITEMAPS
+            ) {
+              queue.push(childURL);
+            }
+          } catch {
+            // 許可されていない子サイトマップは除外
+          }
+        }
+
+        continue;
+      }
+
+      if (parsed.type !== "urlset") {
+        console.warn(
+          "[SITEMAP] Unknown sitemap format:",
+          sitemapURL
+        );
+        continue;
+      }
+
+      // urlsetの場合は、.xmlで終わるURLも通常ページとして扱う
+      for (const location of parsed.locations) {
         if (remainingTime(deadline) < 500) {
           break;
         }
@@ -828,7 +926,204 @@ async function collectSitemapURLs(
             source
           ).href;
 
-          const pathname = new URL(url).pathname;
+          if (
+            allowed(url) &&
+            !isExcludedFile(url)
+          ) {
+            found.add(url);
+          }
+        } catch {
+          // 無効なURLは除外
+        }
+      }
+    } catch (error) {
+      console.warn("[SITEMAP] Fetch failed:", {
+        source: source.name,
+        url: sitemap,
+        error: error.message
+      });
+    }
+  }
+
+  console.log("[SITEMAP] Collection completed:", {
+    source: source.name,
+    checked_sitemaps: checkedSitemaps,
+    found_urls: found.size,
+    remaining_ms: remainingTime(deadline)
+  });
+
+  return [...found];
+}
+
+async function collectSitemapURLs(
+ function extractSitemapLocations(xml) {
+  const isIndex =
+    /<(?:[\w.-]+:)?sitemapindex\b/i.test(xml);
+
+  const isURLSet =
+    /<(?:[\w.-]+:)?urlset\b/i.test(xml);
+
+  const locations = [
+    ...xml.matchAll(
+      /<(?:[\w.-]+:)?loc>\s*(.*?)\s*<\/(?:[\w.-]+:)?loc>/gi
+    )
+  ].map(match =>
+    match[1]
+      .trim()
+      .replace(/&amp;/g, "&")
+  );
+
+  return {
+    type: isIndex
+      ? "index"
+      : isURLSet
+        ? "urlset"
+        : "unknown",
+    locations
+  };
+}
+
+async function collectSitemapURLs(
+  source,
+  allowed,
+  deadline
+) {
+  const found = new Set();
+  const visited = new Set();
+  const base = new URL(source.base_url);
+
+  const sitemapCandidates = [
+    ...(allowed.sitemaps || []),
+    new URL("/sitemap.xml", base).href,
+    new URL("/sitemap_index.xml", base).href,
+    new URL("/wp-sitemap.xml", base).href
+  ];
+
+  const queue = [
+    ...new Set(sitemapCandidates)
+  ];
+
+  let checkedSitemaps = 0;
+
+  while (
+    queue.length > 0 &&
+    checkedSitemaps < MAX_SITEMAPS &&
+    remainingTime(deadline) > 700
+  ) {
+    const sitemap = queue.shift();
+
+    if (visited.has(sitemap)) {
+      continue;
+    }
+
+    visited.add(sitemap);
+    checkedSitemaps++;
+
+    try {
+      const sitemapURL = validateURL(
+        sitemap,
+        source
+      ).href;
+
+      const response = await safeFetch(
+        sitemapURL,
+        source,
+        "application/xml,text/xml,application/xhtml+xml",
+        deadline
+      );
+
+      const xml = (
+        await readLimited(
+          response,
+          MAX_HTML_SIZE
+        )
+      ).toString("utf8");
+
+      const parsed = extractSitemapLocations(xml);
+
+      console.log("[SITEMAP] Read:", {
+        source: source.name,
+        url: sitemapURL,
+        type: parsed.type,
+        location_count: parsed.locations.length
+      });
+
+      if (parsed.type === "index") {
+        // sitemapindexの場合だけ、子サイトマップを追加
+        for (const location of parsed.locations) {
+          if (remainingTime(deadline) < 500) {
+            break;
+          }
+
+          try {
+            const childURL = validateURL(
+              location,
+              source
+            ).href;
+
+            if (
+              !visited.has(childURL) &&
+              !queue.includes(childURL) &&
+              checkedSitemaps + queue.length < MAX_SITEMAPS
+            ) {
+              queue.push(childURL);
+            }
+          } catch {
+            // 許可されていない子サイトマップは除外
+          }
+        }
+
+        continue;
+      }
+
+      if (parsed.type !== "urlset") {
+        console.warn(
+          "[SITEMAP] Unknown sitemap format:",
+          sitemapURL
+        );
+        continue;
+      }
+
+      // urlsetの場合は、.xmlで終わるURLも通常ページとして扱う
+      for (const location of parsed.locations) {
+        if (remainingTime(deadline) < 500) {
+          break;
+        }
+
+        try {
+          const url = validateURL(
+            location,
+            source
+          ).href;
+
+          if (
+            allowed(url) &&
+            !isExcludedFile(url)
+          ) {
+            found.add(url);
+          }
+        } catch {
+          // 無効なURLは除外
+        }
+      }
+    } catch (error) {
+      console.warn("[SITEMAP] Fetch failed:", {
+        source: source.name,
+        url: sitemap,
+        error: error.message
+      });
+    }
+  }
+
+  console.log("[SITEMAP] Collection completed:", {
+    source: source.name,
+    checked_sitemaps: checkedSitemaps,
+    found_urls: found.size,
+    remaining_ms: remainingTime(deadline)
+  });
+
+  return [...found];
+}
 
           // 子サイトマップ
           if (/\.xml$/i.test(pathname)) {
