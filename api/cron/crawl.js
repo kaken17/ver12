@@ -1280,13 +1280,17 @@ async function crawlFeed(
     source
   );
 
-  for (const item of entries) {
+   for (const item of entries) {
     if (remainingTime(deadline) < 400) {
       break;
     }
 
-    stats.found++;
+    // robots.txtで許可されていない記事は処理しない
+    if (!allowed(item.url)) {
+      continue;
+    }
 
+    stats.found++;
     try {
       const result = await saveDocument(
         db,
@@ -1534,7 +1538,7 @@ async function processSource(
 
     const now = new Date().toISOString();
 
-    // last_error列は存在しないため使用しない。
+    // last_errorは現在更新しない。
     // last_success_atは正常完了時だけ更新する。
     const sourceUpdate = {
       last_crawled_at: now,
