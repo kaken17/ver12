@@ -942,14 +942,13 @@ async function collectSitemapURLs(
 async function collectURLs(
   source,
   allowed,
-  deadline
+  deadline,
+  stats
 ) {
   const found = new Set();
   const feeds = new Set();
 
-  const baseURL = new URL(
-    source.base_url
-  ).href;
+  const baseURL = new URL(source.base_url).href;
 
   try {
     console.log("[CRAWL] Sitemap collection started", {
@@ -958,38 +957,40 @@ async function collectURLs(
     });
 
     const sitemapURLs = await collectSitemapURLs(
-  source,
-  allowed,
-  deadline,
-  stats
-);
+      source,
+      allowed,
+      deadline,
+      stats
+    );
 
-stats.diagnostics.push(
-  `サイトマップ取得結果: ${sitemapURLs.length}件`
-);
+    stats.diagnostics.push(
+      `サイトマップ取得結果: ${sitemapURLs.length}件`
+    );
 
     for (const url of sitemapURLs) {
       found.add(url);
     }
 
-    console.log("[CRAWL] Sitemap collection finished", {
-      source: source.name,
-      url_count: found.size,
-      remaining_ms: remainingTime(deadline)
-    });
-
   } catch (error) {
+    const message = error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error);
+
+    stats.diagnostics.push(
+      `サイトマップ収集処理失敗: ${message}`
+    );
+
     console.error(
       "[CRAWL] Sitemap collection error:",
-      error.message
+      message
     );
   }
 
-  // 時間に余裕がある場合だけトップページを調査
   if (remainingTime(deadline) > 1800) {
-        stats.diagnostics.push(
+    stats.diagnostics.push(
       "トップページ調査を開始"
     );
+
     try {
       if (allowed(baseURL)) {
         const html = await getHTML(
@@ -998,8 +999,6 @@ stats.diagnostics.push(
           deadline
         );
 
-        const $ = cheerio.load(html);
-
         for (const feed of discoverFeeds(
           html,
           source,
@@ -1007,6 +1006,8 @@ stats.diagnostics.push(
         )) {
           feeds.add(feed);
         }
+
+        const $ = cheerio.load(html);
 
         $("a[href]").each((_, element) => {
           try {
@@ -1021,14 +1022,17 @@ stats.diagnostics.push(
             ) {
               found.add(url);
             }
-
           } catch {
             // 無効URLを除外
           }
         });
+      } else {
+        stats.diagnostics.push(
+          "robots.txtによりトップページへのアクセスが禁止されています"
+        );
       }
 
-       } catch (error) {
+    } catch (error) {
       const message = error instanceof Error
         ? `${error.name}: ${error.message}`
         : String(error);
@@ -1041,7 +1045,9 @@ stats.diagnostics.push(
         "[CRAWL] Homepage collection error:",
         message
       );
-    }  } else {
+    }
+
+  } else {
     stats.diagnostics.push(
       `トップページ調査を省略: 残り時間 ${remainingTime(deadline)}ms`
     );
@@ -1059,6 +1065,10 @@ stats.diagnostics.push(
     )
   );
 
+  stats.diagnostics.push(
+    `URL収集結果: 候補${found.size}件 / 採用${urls.length}件`
+  );
+
   console.log("[CRAWL] URL collection completed", {
     source: source.name,
     collected_count: found.size,
@@ -1071,6 +1081,7 @@ stats.diagnostics.push(
     feeds: [...feeds]
   };
 }
+
 
 // =============================================
 // カテゴリー分類
@@ -1327,32 +1338,28 @@ async function crawlFeed(
       stats[result]++;
 
    
-    } catch (error) {
-      stats.errors++;
+            } catch (error) {
+          stats.errors++;
 
-      const errorDetail =
-        error instanceof Error
-          ? `${error.name}: ${error.message}`
-          : String(error);
+          const message = error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
 
-      console.error(
-        "RSS保存エラー:",
-        {
-          source: source.name,
-          url: item.url,
-          error: errorDetail,
+          stats.errorDetails.push({
+            type: "feed_fetch",
+            url: feedURL,
+            message
+          });
+
+          console.error(
+            "[CRAWL] Feed failed",
+            {
+              source: source.name,
+              url: feedURL,
+              message
+            }
+          );
         }
-      );
-
-      // 後から原因を確認できるように保存
-      stats.errorDetails ??= [];
-      stats.errorDetails.push({
-        type: "rss_save",
-        url: item.url,
-        message: errorDetail,
-      });
-    }
-   }
 }
 // =============================================
 // HTML・PDF巡回
@@ -1405,15 +1412,29 @@ async function crawlPages(
       stats[result]++;
 
     } catch (error) {
+        } catch (error) {
       stats.errors++;
+
+      const message = error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error);
+
+      stats.errorDetails.push({
+        type: "page_crawl",
+        url,
+        message
+      });
 
       console.error(
         "ページ収集エラー:",
-        url,
-        error.message
+        {
+          source: source.name,
+          url,
+          message
+        }
       );
     }
-  }
+    
 }
 
 // =============================================
@@ -1868,10 +1889,11 @@ export default async function handler(req, res) {
       );
 
       try {
-        const result = await processSource(
-          db,
-          source,
-          startedAt
+        const collected = await collectURLs(
+  source,
+  allowed,
+  deadline,
+  stats
         );
 
         results.push(result);
@@ -1881,30 +1903,27 @@ export default async function handler(req, res) {
           result
         );
 
-      } catch (error) {
-        console.error(
-          "[CRAWL] Source failed",
-          {
-            name: source.name,
-            message: error?.message
-          }
-        );
+             } catch (error) {
+          stats.errors++;
 
-        results.push({
-          source: source.name,
-          status: "failed",
-          error: String(
-            error?.message || error
-          ).slice(0, 300),
-          found: 0,
-          new: 0,
-          updated: 0,
-          skipped: 0,
-          errors: 1
-        });
-      }
-    }
+          const message = error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
 
+          stats.errorDetails.push({
+            type: "invalid_feed_url",
+            url: String(source.feed_url),
+            message
+          });
+
+          console.warn(
+            "[CRAWL] Invalid feed_url",
+            {
+              source: source.name,
+              message
+            }
+          );
+        }
     // 集計
     const totals = results.reduce(
       (total, result) => {
